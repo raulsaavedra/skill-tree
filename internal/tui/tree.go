@@ -2,12 +2,13 @@ package tui
 
 import (
 	"fmt"
+	"math/rand"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/raulsaavedra/skill-builder/internal/store"
+	"github.com/raulsaavedra/skill-tree/internal/store"
 )
 
 // LevelLabel returns the human-readable label for a skill level (0-5).
@@ -270,8 +271,6 @@ func (m TreeModel) updateDetail(msg tea.KeyMsg) (TreeModel, tea.Cmd) {
 		if m.detailCursor < len(m.detailDecks)-1 {
 			m.detailCursor++
 		}
-	case "r":
-		// handled by AppModel — returns with detail state intact
 	case "?":
 		m.prevStage = stageSkillDetail
 		m.stage = stageLevelHelp
@@ -279,9 +278,28 @@ func (m TreeModel) updateDetail(msg tea.KeyMsg) (TreeModel, tea.Cmd) {
 	return m, nil
 }
 
-// WantsReview returns the deck the user wants to review (pressed 'r' in detail).
+// WantsReview returns true when the user wants to review a deck from detail view.
 func (m TreeModel) WantsReview() bool {
 	return m.stage == stageSkillDetail && len(m.detailDecks) > 0
+}
+
+// collectSkillCards gathers all cards for a skill and its children, shuffled.
+func (m TreeModel) collectSkillCards(skill store.Skill) []store.Card {
+	var cards []store.Card
+	// Collect from the skill's own decks.
+	for _, d := range skill.Decks {
+		cards = append(cards, m.cardsByDeck[d.ID]...)
+	}
+	// Collect from children's decks.
+	for _, child := range skill.Children {
+		for _, d := range child.Decks {
+			cards = append(cards, m.cardsByDeck[d.ID]...)
+		}
+	}
+	rand.Shuffle(len(cards), func(i, j int) {
+		cards[i], cards[j] = cards[j], cards[i]
+	})
+	return cards
 }
 
 // SelectedDetailDecks returns the decks for the currently selected skill.
@@ -314,7 +332,7 @@ func (m TreeModel) renderTree() string {
 	}
 
 	lines = append(lines, "")
-	lines = append(lines, lipgloss.NewStyle().Faint(true).Render("j/k Navigate  enter Expand/Collapse  d Detail  ? Levels  q Quit"))
+	lines = append(lines, lipgloss.NewStyle().Faint(true).Render("j/k Navigate  enter Expand/Collapse  d Detail  t Test  ? Levels  q Quit"))
 	return renderWithHorizontalPadding(lines, m.width)
 }
 
@@ -541,7 +559,7 @@ func (m TreeModel) renderDetail() string {
 	lines = append(lines, "")
 
 	// Help.
-	help := "j/k Navigate  r Review deck  ? Levels  b Back  q Quit"
+	help := "j/k Navigate  enter Review  t Test  ? Levels  b Back  q Quit"
 	lines = append(lines, lipgloss.NewStyle().Faint(true).Render(help))
 	return renderWithHorizontalPadding(lines, m.width)
 }
@@ -594,8 +612,33 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m AppModel) updateTree(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	// Check for 'r' in detail view to launch review.
-	if msg.String() == "r" && m.tree.stage == stageSkillDetail && len(m.tree.detailDecks) > 0 {
+	key := msg.String()
+
+	// 't' launches test mode: shuffled cards from skill + children.
+	if key == "t" {
+		var skill *store.Skill
+		if m.tree.stage == stageSkillDetail && m.tree.selected != nil {
+			skill = m.tree.selected
+		} else if m.tree.stage == stageTree && m.tree.cursor >= 0 && m.tree.cursor < len(m.tree.flatNodes) {
+			s := m.tree.flatNodes[m.tree.cursor].skill
+			skill = &s
+		}
+		if skill != nil {
+			cards := m.tree.collectSkillCards(*skill)
+			if len(cards) > 0 {
+				deck := store.Deck{ID: -1, Name: skill.Name + " (test)", CardCount: len(cards)}
+				decks := []store.Deck{deck}
+				cardsByDeck := map[int64][]store.Card{-1: cards}
+				m.review = NewReviewModel(decks, cardsByDeck, 0, ModeAuto, true)
+				m.review.width = m.width
+				m.active = appReview
+				return m, nil
+			}
+		}
+	}
+
+	// Check for 'enter' in detail view to launch review.
+	if (key == "enter" || key == " ") && m.tree.stage == stageSkillDetail && len(m.tree.detailDecks) > 0 {
 		decks := m.tree.detailDecks
 		cardsByDeck := make(map[int64][]store.Card)
 		for _, d := range decks {

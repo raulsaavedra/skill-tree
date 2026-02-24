@@ -1,4 +1,4 @@
-module github.com/raulsaavedra/skill-builder
+module github.com/raulsaavedra/skill-tree
 
 go 1.24.1
 

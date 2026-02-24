@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/raulsaavedra/cli-core/pkg/sqliteutil"
@@ -91,10 +93,35 @@ type CardUpdate struct {
 
 // --- Open / Close ---
 
+// migrateOldDataDir moves ~/.skill-builder/ to ~/.skill-tree/ if the new dir
+// doesn't exist yet but the old one does (one-time rename migration).
+func migrateOldDataDir() {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	oldDir := filepath.Join(home, ".skill-builder")
+	newDir := filepath.Join(home, ".skill-tree")
+	if _, err := os.Stat(newDir); err == nil {
+		return // new dir already exists
+	}
+	if _, err := os.Stat(oldDir); err != nil {
+		return // old dir doesn't exist either
+	}
+	// Rename old DB file inside old dir, then rename the dir itself.
+	oldDB := filepath.Join(oldDir, "skill-builder.db")
+	newDB := filepath.Join(oldDir, "skill-tree.db")
+	if _, err := os.Stat(oldDB); err == nil {
+		_ = os.Rename(oldDB, newDB)
+	}
+	_ = os.Rename(oldDir, newDir)
+}
+
 func Open() (*Store, string, error) {
+	migrateOldDataDir()
 	db, path, err := sqliteutil.OpenSQLite(sqliteutil.OpenOptions{
-		AppName:  "skill-builder",
-		Filename: "skill-builder.db",
+		AppName:  "skill-tree",
+		Filename: "skill-tree.db",
 		Pragmas:  []string{"foreign_keys = ON"},
 		Migrate:  migrate,
 	})

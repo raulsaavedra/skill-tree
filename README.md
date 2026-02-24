@@ -1,4 +1,4 @@
-# skill-builder
+# skill-tree
 
 A unified learning CLI that tracks skills, quiz decks, and hands-on scenarios in one tool.
 
@@ -13,7 +13,7 @@ A unified learning CLI that tracks skills, quiz decks, and hands-on scenarios in
 
 ```
 ./install.sh
-skill-builder tree
+skill-tree
 ```
 
 ## Stack
@@ -24,10 +24,10 @@ skill-builder tree
 
 ## Data
 
-All data lives in `~/.skill-builder/skill-builder.db`. Import existing quiz decks with:
+All data lives in `~/.skill-tree/skill-tree.db`. Import existing quiz decks with:
 
 ```
-skill-builder import --from-quiz
+skill-tree import --from-quiz
 ```
 
 ## Claude integration
@@ -35,7 +35,7 @@ skill-builder import --from-quiz
 This CLI is designed to work with Claude Code as a learning companion. Install the Claude skill to teach Claude how to use it:
 
 ```
-skill-builder skill install --link --force
+skill-tree skill install --link --force
 ```
 
-The skill definition lives in `skills/skill-builder/SKILL.md` and instructs Claude on session startup, deck creation, tutoring, and skill level updates.
+The skill definition lives in `skills/skill-tree/SKILL.md` and instructs Claude on session startup, deck creation, tutoring, and skill level updates.

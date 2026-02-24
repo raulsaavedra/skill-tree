@@ -14,14 +14,17 @@ import (
 	"github.com/raulsaavedra/cli-core/pkg/sqliteutil"
 	"github.com/spf13/cobra"
 
-	"github.com/raulsaavedra/skill-builder/internal/store"
-	"github.com/raulsaavedra/skill-builder/internal/tui"
+	"github.com/raulsaavedra/skill-tree/internal/store"
+	"github.com/raulsaavedra/skill-tree/internal/tui"
 )
 
 func main() {
 	root := &cobra.Command{
-		Use:   "skill-builder",
+		Use:   "skill-tree",
 		Short: "Unified learning CLI: skill tree + quiz decks + scenarios",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runTree()
+		},
 	}
 
 	root.AddCommand(
@@ -257,9 +260,9 @@ func skillCmd() *cobra.Command {
 				return err
 			}
 			path, err := skills.Install(skills.InstallOptions{
-				SrcDir:    "skills/skill-builder",
+				SrcDir:    "skills/skill-tree",
 				DestDir:   destDir,
-				Name:      "skill-builder",
+				Name:      "skill-tree",
 				Overwrite: force,
 				Link:      link,
 			})
@@ -1064,36 +1067,40 @@ func treeCmd() *cobra.Command {
 		Use:   "tree",
 		Short: "Interactive skill tree TUI",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			st, err := openStore()
-			if err != nil {
-				return err
-			}
-			defer st.Close()
-
-			ctx, err := st.FullContext()
-			if err != nil {
-				return err
-			}
-
-			allDecks, err := st.ListDecks()
-			if err != nil {
-				return err
-			}
-
-			cardsByDeck := make(map[int64][]store.Card, len(allDecks))
-			for _, deck := range allDecks {
-				cards, err := st.ListCards(deck.ID, 200)
-				if err != nil {
-					return err
-				}
-				cardsByDeck[deck.ID] = cards
-			}
-
-			model := tui.NewAppModel(ctx.Skills, allDecks, cardsByDeck)
-			_, err = tea.NewProgram(model, tea.WithAltScreen()).Run()
-			return err
+			return runTree()
 		},
 	}
+}
+
+func runTree() error {
+	st, err := openStore()
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+
+	ctx, err := st.FullContext()
+	if err != nil {
+		return err
+	}
+
+	allDecks, err := st.ListDecks()
+	if err != nil {
+		return err
+	}
+
+	cardsByDeck := make(map[int64][]store.Card, len(allDecks))
+	for _, deck := range allDecks {
+		cards, err := st.ListCards(deck.ID, 200)
+		if err != nil {
+			return err
+		}
+		cardsByDeck[deck.ID] = cards
+	}
+
+	model := tui.NewAppModel(ctx.Skills, allDecks, cardsByDeck)
+	_, err = tea.NewProgram(model, tea.WithAltScreen()).Run()
+	return err
 }
 
 // --- import ---

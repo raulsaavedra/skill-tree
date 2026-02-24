@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BIN_NAME="skill-builder"
+BIN_NAME="skill-tree"
 INSTALL_DIR="${INSTALL_DIR:-${HOME}/.local/bin}"
 
 mkdir -p "${INSTALL_DIR}"

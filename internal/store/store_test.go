@@ -11,7 +11,7 @@ import (
 
 func openTempStore(t *testing.T) *Store {
 	t.Helper()
-	dbPath := filepath.Join(t.TempDir(), "skill-builder.db")
+	dbPath := filepath.Join(t.TempDir(), "skill-tree.db")
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)

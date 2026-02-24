@@ -1,29 +1,29 @@
 ---
-name: skill-builder
+name: skill-tree
 description: Unified learning CLI — skill tree, quiz decks, and hands-on scenarios in one tool. Use at session start to load learning context.
 ---
 
 ## Overview
-- `skill-builder` is a unified learning CLI that tracks skills (hierarchical tree with levels), quiz decks (flashcard/MCQ review), and hands-on scenarios.
+- `skill-tree` is a unified learning CLI that tracks skills (hierarchical tree with levels), quiz decks (flashcard/MCQ review), and hands-on scenarios.
 - All data is stored in a local SQLite database. The CLI does not call LLMs or external APIs.
 - Skills, decks, cards, and scenarios are managed via CLI commands; SQLite is the canonical store.
 - Review is TUI-only and supports flashcard, MCQ, and auto modes.
 - Decks and scenarios can be linked to skills to show learning activities per skill.
 
 ## Important: Command Format
-- **Always use single-line commands** for all skill-builder CLI operations.
+- **Always use single-line commands** for all skill-tree CLI operations.
 - Do NOT use backslash (`\`) line continuations.
-- This ensures Claude Code permissions work correctly with `Bash(skill-builder:*)` patterns.
+- This ensures Claude Code permissions work correctly with `Bash(skill-tree:*)` patterns.
 
 ## Session Start
 At the start of every learning session, run:
 ```
-skill-builder context --json
+skill-tree context --json
 ```
 This returns the full skill tree with levels, linked decks (with card counts), linked scenarios, and all active (planned/in_progress) scenarios. Use this to understand where the learner currently stands.
 
 ## Database location
-- `$HOME/.skill-builder/skill-builder.db`
+- `$HOME/.skill-tree/skill-tree.db`
 
 ## Skill management
 
@@ -49,23 +49,23 @@ This returns the full skill tree with levels, linked decks (with card counts), l
 
 ### Skill commands
 - Add a root skill:
-  - `skill-builder skill add --name "AWS"`
+  - `skill-tree skill add --name "AWS"`
 - Add a child skill:
-  - `skill-builder skill add --name "VPC" --parent-id 1 --description "Virtual Private Cloud" --level 1`
+  - `skill-tree skill add --name "VPC" --parent-id 1 --description "Virtual Private Cloud" --level 1`
 - List skills (flat):
-  - `skill-builder skill list`
+  - `skill-tree skill list`
 - List skills (tree):
-  - `skill-builder skill list --tree`
+  - `skill-tree skill list --tree`
 - List skills (JSON):
-  - `skill-builder skill list --json`
+  - `skill-tree skill list --json`
 - Show a skill with linked decks and scenarios:
-  - `skill-builder skill show --id 2`
-  - `skill-builder skill show --id 2 --json`
+  - `skill-tree skill show --id 2`
+  - `skill-tree skill show --id 2 --json`
 - Update a skill:
-  - `skill-builder skill update --id 2 --level 3`
-  - `skill-builder skill update --id 2 --name "VPC & Subnets" --description "Updated description"`
+  - `skill-tree skill update --id 2 --level 3`
+  - `skill-tree skill update --id 2 --name "VPC & Subnets" --description "Updated description"`
 - Delete a skill:
-  - `skill-builder skill delete --id 2`
+  - `skill-tree skill delete --id 2`
 
 ## Scenario management
 
@@ -80,25 +80,25 @@ This returns the full skill tree with levels, linked decks (with card counts), l
 
 ### Scenario commands
 - Add a scenario linked to skills:
-  - `skill-builder scenario add --name "Build multi-tier VPC" --description "Hands-on VPC lab" --skill-id 1 --skill-id 2`
+  - `skill-tree scenario add --name "Build multi-tier VPC" --description "Hands-on VPC lab" --skill-id 1 --skill-id 2`
 - Add a scenario with a repo path:
-  - `skill-builder scenario add --name "Deploy Go service" --repo "/Users/raulsaavedra/src/vpc-lab"`
+  - `skill-tree scenario add --name "Deploy Go service" --repo "/Users/raulsaavedra/src/vpc-lab"`
 - List all scenarios:
-  - `skill-builder scenario list`
-  - `skill-builder scenario list --json`
+  - `skill-tree scenario list`
+  - `skill-tree scenario list --json`
 - List by status:
-  - `skill-builder scenario list --status in_progress`
+  - `skill-tree scenario list --status in_progress`
 - Show a scenario:
-  - `skill-builder scenario show --id 1`
-  - `skill-builder scenario show --id 1 --json`
+  - `skill-tree scenario show --id 1`
+  - `skill-tree scenario show --id 1 --json`
 - Update scenario status:
-  - `skill-builder scenario update --id 1 --status in_progress`
-  - `skill-builder scenario update --id 1 --status completed`
+  - `skill-tree scenario update --id 1 --status in_progress`
+  - `skill-tree scenario update --id 1 --status completed`
 - Delete a scenario:
-  - `skill-builder scenario delete --id 1`
+  - `skill-tree scenario delete --id 1`
 - Link/unlink a scenario to a skill:
-  - `skill-builder scenario link --scenario-id 1 --skill-id 3`
-  - `skill-builder scenario unlink --scenario-id 1 --skill-id 3`
+  - `skill-tree scenario link --scenario-id 1 --skill-id 3`
+  - `skill-tree scenario unlink --scenario-id 1 --skill-id 3`
 
 ## Deck management
 
@@ -111,20 +111,20 @@ This returns the full skill tree with levels, linked decks (with card counts), l
 
 ### Deck commands
 - Create a deck:
-  - `skill-builder deck create --deck-name "VPC Fundamentals" --description "Core VPC concepts"`
+  - `skill-tree deck create --deck-name "VPC Fundamentals" --description "Core VPC concepts"`
 - Create a deck linked to a skill:
-  - `skill-builder deck create --deck-name "VPC Fundamentals" --skill-id 2`
+  - `skill-tree deck create --deck-name "VPC Fundamentals" --skill-id 2`
 - Create a deck from JSON:
-  - `skill-builder deck create --data '{"name":"VPC Quiz","description":"VPC questions","cards":[{"question":"What is a VPC?","answer":"Virtual Private Cloud"}]}'`
+  - `skill-tree deck create --data '{"name":"VPC Quiz","description":"VPC questions","cards":[{"question":"What is a VPC?","answer":"Virtual Private Cloud"}]}'`
 - List decks:
-  - `skill-builder deck list`
-  - `skill-builder deck list --json`
+  - `skill-tree deck list`
+  - `skill-tree deck list --json`
 - Delete a deck:
-  - `skill-builder deck delete --deck-id 1`
-  - `skill-builder deck delete --deck-name "VPC Quiz"`
+  - `skill-tree deck delete --deck-id 1`
+  - `skill-tree deck delete --deck-name "VPC Quiz"`
 - Link/unlink a deck to a skill:
-  - `skill-builder deck link --deck-id 1 --skill-id 2`
-  - `skill-builder deck unlink --deck-id 1 --skill-id 2`
+  - `skill-tree deck link --deck-id 1 --skill-id 2`
+  - `skill-tree deck unlink --deck-id 1 --skill-id 2`
 
 ## Card management
 
@@ -148,33 +148,33 @@ The `answer` and `extra` fields support markdown formatting in the TUI:
 
 ### Card commands
 - Add a card:
-  - `skill-builder card add --deck-id 1 --question "What is a VPC?" --answer "Virtual Private Cloud" --extra "Logically isolated network in AWS"`
+  - `skill-tree card add --deck-id 1 --question "What is a VPC?" --answer "Virtual Private Cloud" --extra "Logically isolated network in AWS"`
 - Add an MCQ card:
-  - `skill-builder card add --deck-id 1 --question "Which is a VPC component?" --answer "Subnet" --choice "Lambda" --choice "Subnet" --choice "S3 Bucket" --correct-index 1 --tag "networking"`
+  - `skill-tree card add --deck-id 1 --question "Which is a VPC component?" --answer "Subnet" --choice "Lambda" --choice "Subnet" --choice "S3 Bucket" --correct-index 1 --tag "networking"`
 - Add multiple cards via JSON:
-  - `skill-builder card add --deck-id 1 --data '[{"question":"Q1","answer":"A1"},{"question":"Q2","answer":"A2","extra":"Details"}]'`
-  - `skill-builder card add --deck-id 1 --file /tmp/cards.json`
+  - `skill-tree card add --deck-id 1 --data '[{"question":"Q1","answer":"A1"},{"question":"Q2","answer":"A2","extra":"Details"}]'`
+  - `skill-tree card add --deck-id 1 --file /tmp/cards.json`
 - List cards:
-  - `skill-builder card list --deck-id 1`
-  - `skill-builder card list --deck-id 1 --limit 100`
+  - `skill-tree card list --deck-id 1`
+  - `skill-tree card list --deck-id 1 --limit 100`
 - Show a card:
-  - `skill-builder card show --deck-id 1 --card-id 5`
+  - `skill-tree card show --deck-id 1 --card-id 5`
 - Update a card:
-  - `skill-builder card update --deck-id 1 --card-id 5 --answer "Updated answer" --extra "New explanation"`
+  - `skill-tree card update --deck-id 1 --card-id 5 --answer "Updated answer" --extra "New explanation"`
 - Delete cards:
-  - `skill-builder card delete --deck-id 1 --card-id 5`
-  - `skill-builder card delete --deck-id 1 --card-ids "1,2,5-7"`
+  - `skill-tree card delete --deck-id 1 --card-id 5`
+  - `skill-tree card delete --deck-id 1 --card-ids "1,2,5-7"`
 
 ## Review
 
 ### Review entrypoints
 - Review all decks (with TUI deck selector):
-  - `skill-builder review`
+  - `skill-tree review`
 - Review a specific deck:
-  - `skill-builder review --deck "VPC Fundamentals"`
-  - `skill-builder review "VPC Fundamentals"`
+  - `skill-tree review --deck "VPC Fundamentals"`
+  - `skill-tree review "VPC Fundamentals"`
 - Review all cards linked to a skill (includes child skills):
-  - `skill-builder review --skill "VPC"`
+  - `skill-tree review --skill "VPC"`
 
 ### Review mode (`--mode`)
 - `--mode flashcard`: show question, reveal answer + extra.
@@ -190,38 +190,38 @@ The `answer` and `extra` fields support markdown formatting in the TUI:
 
 ## Tree TUI
 ```
-skill-builder tree
+skill-tree tree
 ```
 Interactive skill tree navigator. Navigate with `j`/`k`, expand/collapse with `enter`, press `d` for skill detail (shows linked decks and scenarios), `r` to start a review from detail view, `b` to go back, `q` to quit.
 
 ## Import from quiz CLI
 ```
-skill-builder import --from-quiz
+skill-tree import --from-quiz
 ```
-Imports all decks and cards from `~/.quiz/quiz.db` into skill-builder. Skips decks whose name already exists (idempotent). Does not delete the quiz database.
+Imports all decks and cards from `~/.quiz/quiz.db` into skill-tree. Skips decks whose name already exists (idempotent). Does not delete the quiz database.
 
 ## Recommended flows
 
 ### Setting up a new skill area
 1. Create the skill hierarchy:
-   - `skill-builder skill add --name "AWS"`
-   - `skill-builder skill add --name "Networking" --parent-id 1`
-   - `skill-builder skill add --name "VPC" --parent-id 2 --level 0`
+   - `skill-tree skill add --name "AWS"`
+   - `skill-tree skill add --name "Networking" --parent-id 1`
+   - `skill-tree skill add --name "VPC" --parent-id 2 --level 0`
 2. Create a quiz deck linked to the skill:
-   - `skill-builder deck create --deck-name "VPC Fundamentals" --description "Core VPC concepts" --skill-id 3`
+   - `skill-tree deck create --deck-name "VPC Fundamentals" --description "Core VPC concepts" --skill-id 3`
 3. Add cards to the deck.
 4. Create a hands-on scenario:
-   - `skill-builder scenario add --name "Build multi-tier VPC" --skill-id 2 --skill-id 3`
+   - `skill-tree scenario add --name "Build multi-tier VPC" --skill-id 2 --skill-id 3`
 
 ### Running a learning session
-1. Load context: `skill-builder context --json`
+1. Load context: `skill-tree context --json`
 2. Pick an active scenario or create one.
-3. Start scenario: `skill-builder scenario update --id 1 --status in_progress`
+3. Start scenario: `skill-tree scenario update --id 1 --status in_progress`
 4. Work through the scenario hands-on with Claude as tutor.
 5. Create/update quiz cards based on what was learned.
-6. Update skill levels as proficiency grows: `skill-builder skill update --id 3 --level 2`
-7. Complete scenario: `skill-builder scenario update --id 1 --status completed`
-8. Review cards: `skill-builder review --skill "VPC"`
+6. Update skill levels as proficiency grows: `skill-tree skill update --id 3 --level 2`
+7. Complete scenario: `skill-tree scenario update --id 1 --status completed`
+8. Review cards: `skill-tree review --skill "VPC"`
 
 ### Updating skill levels
 Update levels based on demonstrated proficiency during sessions:
@@ -233,27 +233,27 @@ Update levels based on demonstrated proficiency during sessions:
 
 ### Refining an existing deck
 1. Identify the deck:
-   - `skill-builder deck list`
+   - `skill-tree deck list`
 2. Inspect current cards:
-   - `skill-builder card list --deck-id <DECK_ID>`
-   - `skill-builder card show --deck-id <DECK_ID> --card-id <CARD_ID>`
+   - `skill-tree card list --deck-id <DECK_ID>`
+   - `skill-tree card show --deck-id <DECK_ID> --card-id <CARD_ID>`
 3. Edit cards:
-   - `skill-builder card update --deck-id <DECK_ID> --card-id <CARD_ID> --answer "Better answer" --extra "Clearer explanation"`
+   - `skill-tree card update --deck-id <DECK_ID> --card-id <CARD_ID> --answer "Better answer" --extra "Clearer explanation"`
 4. Remove cards that are no longer needed:
-   - `skill-builder card delete --deck-id <DECK_ID> --card-id <CARD_ID>`
-   - `skill-builder card delete --deck-id <DECK_ID> --card-ids "50,51,52-55"`
-5. Add new cards as needed with `skill-builder card add`.
+   - `skill-tree card delete --deck-id <DECK_ID> --card-id <CARD_ID>`
+   - `skill-tree card delete --deck-id <DECK_ID> --card-ids "50,51,52-55"`
+5. Add new cards as needed with `skill-tree card add`.
 
 ### Study sessions
 When the learner is ready to study in the TUI, suggest the appropriate review command:
-- Understanding / first pass: `skill-builder review --deck "Deck Name" --mode flashcard`
-- Exam-style practice: `skill-builder review --deck "Deck Name" --mode mcq`
-- Mixed review: `skill-builder review --deck "Deck Name" --mode auto`
-- Skill-scoped review: `skill-builder review --skill "VPC"`
+- Understanding / first pass: `skill-tree review --deck "Deck Name" --mode flashcard`
+- Exam-style practice: `skill-tree review --deck "Deck Name" --mode mcq`
+- Mixed review: `skill-tree review --deck "Deck Name" --mode auto`
+- Skill-scoped review: `skill-tree review --skill "VPC"`
 
 ## Tutoring with decks
 
-The learner runs `skill-builder review` in their own terminal and may ask for help understanding specific questions or topics.
+The learner runs `skill-tree review` in their own terminal and may ask for help understanding specific questions or topics.
 
 ### How to tutor
 - Map what the learner reports (question text, options, or question number) to the corresponding card in the deck.

@@ -7,7 +7,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/raulsaavedra/skill-builder/internal/store"
+	"github.com/raulsaavedra/skill-tree/internal/store"
 )
 
 type reviewStage int
