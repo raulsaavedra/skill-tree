@@ -255,6 +255,50 @@ func (s *Store) GetSkill(id int64) (*Skill, error) {
 		sk.ParentID = &pid.Int64
 	}
 
+	if err := s.loadSkillLinks(&sk); err != nil {
+		return nil, err
+	}
+
+	// Load children with their links
+	children, err := s.getChildSkills(id)
+	if err != nil {
+		return nil, err
+	}
+	sk.Children = children
+
+	return &sk, nil
+}
+
+func (s *Store) getChildSkills(parentID int64) ([]Skill, error) {
+	rows, err := s.DB.Query(`
+		SELECT id, parent_id, name, COALESCE(description,''), level, created_at, updated_at
+		FROM skills WHERE parent_id = ?
+		ORDER BY name ASC
+	`, parentID)
+	if err != nil {
+		return nil, fmt.Errorf("get child skills: %w", err)
+	}
+	defer rows.Close()
+
+	var children []Skill
+	for rows.Next() {
+		var sk Skill
+		var pid sql.NullInt64
+		if err := rows.Scan(&sk.ID, &pid, &sk.Name, &sk.Description, &sk.Level, &sk.CreatedAt, &sk.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("get child skills scan: %w", err)
+		}
+		if pid.Valid {
+			sk.ParentID = &pid.Int64
+		}
+		if err := s.loadSkillLinks(&sk); err != nil {
+			return nil, err
+		}
+		children = append(children, sk)
+	}
+	return children, rows.Err()
+}
+
+func (s *Store) loadSkillLinks(sk *Skill) error {
 	// Linked decks
 	drows, err := s.DB.Query(`
 		SELECT d.id, d.name, COALESCE(d.description,''), COUNT(c.id), d.updated_at
@@ -264,21 +308,21 @@ func (s *Store) GetSkill(id int64) (*Skill, error) {
 		WHERE ds.skill_id = ?
 		GROUP BY d.id
 		ORDER BY d.name
-	`, id)
+	`, sk.ID)
 	if err != nil {
-		return nil, fmt.Errorf("get skill decks: %w", err)
+		return fmt.Errorf("get skill decks: %w", err)
 	}
 	defer drows.Close()
 	sk.Decks = []Deck{}
 	for drows.Next() {
 		var d Deck
 		if err := drows.Scan(&d.ID, &d.Name, &d.Description, &d.CardCount, &d.UpdatedAt); err != nil {
-			return nil, fmt.Errorf("get skill decks scan: %w", err)
+			return fmt.Errorf("get skill decks scan: %w", err)
 		}
 		sk.Decks = append(sk.Decks, d)
 	}
 	if err := drows.Err(); err != nil {
-		return nil, err
+		return err
 	}
 
 	// Linked scenarios
@@ -289,24 +333,20 @@ func (s *Store) GetSkill(id int64) (*Skill, error) {
 		JOIN scenarios sc ON sc.id = ss.scenario_id
 		WHERE ss.skill_id = ?
 		ORDER BY sc.name
-	`, id)
+	`, sk.ID)
 	if err != nil {
-		return nil, fmt.Errorf("get skill scenarios: %w", err)
+		return fmt.Errorf("get skill scenarios: %w", err)
 	}
 	defer srows.Close()
 	sk.Scenarios = []Scenario{}
 	for srows.Next() {
 		var sc Scenario
 		if err := srows.Scan(&sc.ID, &sc.Name, &sc.Description, &sc.RepoPath, &sc.Status, &sc.CreatedAt, &sc.UpdatedAt, &sc.CompletedAt); err != nil {
-			return nil, fmt.Errorf("get skill scenarios scan: %w", err)
+			return fmt.Errorf("get skill scenarios scan: %w", err)
 		}
 		sk.Scenarios = append(sk.Scenarios, sc)
 	}
-	if err := srows.Err(); err != nil {
-		return nil, err
-	}
-
-	return &sk, nil
+	return srows.Err()
 }
 
 func (s *Store) UpdateSkill(id int64, update SkillUpdate) error {
@@ -819,7 +859,13 @@ func (s *Store) ensureCard(deckID, cardID int64) error {
 // --- Scenario CRUD ---
 
 func (s *Store) CreateScenario(name, description, repoPath string, skillIDs []int64) (int64, error) {
-	res, err := s.DB.Exec(
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return 0, fmt.Errorf("create scenario begin: %w", err)
+	}
+	defer tx.Rollback()
+
+	res, err := tx.Exec(
 		`INSERT INTO scenarios(name, description, repo_path) VALUES(?, ?, ?)`,
 		name, nullIfEmpty(description), nullIfEmpty(repoPath),
 	)
@@ -831,9 +877,12 @@ func (s *Store) CreateScenario(name, description, repoPath string, skillIDs []in
 		return 0, err
 	}
 	for _, sid := range skillIDs {
-		if _, err := s.DB.Exec(`INSERT OR IGNORE INTO scenario_skills(scenario_id, skill_id) VALUES(?, ?)`, id, sid); err != nil {
+		if _, err := tx.Exec(`INSERT OR IGNORE INTO scenario_skills(scenario_id, skill_id) VALUES(?, ?)`, id, sid); err != nil {
 			return 0, fmt.Errorf("link scenario skill: %w", err)
 		}
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("create scenario commit: %w", err)
 	}
 	return id, nil
 }
@@ -1167,6 +1216,12 @@ func (s *Store) ImportFromQuiz(quizDBPath string) (int, int, error) {
 		return 0, 0, err
 	}
 
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return 0, 0, fmt.Errorf("import begin: %w", err)
+	}
+	defer tx.Rollback()
+
 	decksImported := 0
 	cardsImported := 0
 
@@ -1177,9 +1232,13 @@ func (s *Store) ImportFromQuiz(quizDBPath string) (int, int, error) {
 			continue
 		}
 
-		newDeckID, err := s.CreateDeck(qd.name, qd.description)
+		res, err := tx.Exec(`INSERT INTO decks(name, description) VALUES(?, ?)`, qd.name, qd.description)
 		if err != nil {
-			return decksImported, cardsImported, fmt.Errorf("import create deck %q: %w", qd.name, err)
+			return 0, 0, fmt.Errorf("import create deck %q: %w", qd.name, err)
+		}
+		newDeckID, err := res.LastInsertId()
+		if err != nil {
+			return 0, 0, err
 		}
 		decksImported++
 
@@ -1189,7 +1248,7 @@ func (s *Store) ImportFromQuiz(quizDBPath string) (int, int, error) {
 			FROM cards WHERE deck_id = ? ORDER BY id
 		`, qd.id)
 		if err != nil {
-			return decksImported, cardsImported, fmt.Errorf("import read cards: %w", err)
+			return 0, 0, fmt.Errorf("import read cards: %w", err)
 		}
 
 		for crows.Next() {
@@ -1199,42 +1258,89 @@ func (s *Store) ImportFromQuiz(quizDBPath string) (int, int, error) {
 			var correctIndex sql.NullInt64
 			if err := crows.Scan(&cardID, &question, &answer, &extra, &choicesRaw, &correctIndex); err != nil {
 				crows.Close()
-				return decksImported, cardsImported, fmt.Errorf("import scan card: %w", err)
+				return 0, 0, fmt.Errorf("import scan card: %w", err)
 			}
 
-			card := Card{
-				Question: question,
-				Answer:   answer,
-				Extra:    extra,
-				Choices:  decodeChoices(choicesRaw),
+			choices := decodeChoices(choicesRaw)
+			choicesValue := encodeChoices(choices)
+			var extraValue any
+			if extra == "" {
+				extraValue = nil
+			} else {
+				extraValue = extra
 			}
+			var ciValue any
 			if correctIndex.Valid {
-				idx := int(correctIndex.Int64)
-				card.CorrectIndex = &idx
+				ciValue = correctIndex.Int64
 			}
 
-			// Read tags from quiz DB
+			cardRes, err := tx.Exec(
+				`INSERT INTO cards(deck_id, question, answer, extra, choices, correct_index) VALUES(?, ?, ?, ?, ?, ?)`,
+				newDeckID, question, answer, extraValue, choicesValue, ciValue,
+			)
+			if err != nil {
+				crows.Close()
+				return 0, 0, fmt.Errorf("import insert card: %w", err)
+			}
+			newCardID, _ := cardRes.LastInsertId()
+
+			// Read and insert tags from quiz DB
 			trows, err := quizDB.Query(`SELECT tag FROM card_tags WHERE card_id = ? ORDER BY tag`, cardID)
 			if err == nil {
 				for trows.Next() {
 					var tag string
 					if err := trows.Scan(&tag); err == nil {
-						card.Tags = append(card.Tags, tag)
+						tx.Exec(`INSERT OR IGNORE INTO card_tags(card_id, tag) VALUES(?, ?)`, newCardID, tag)
 					}
 				}
 				trows.Close()
 			}
 
-			if _, err := s.InsertCard(newDeckID, card); err != nil {
-				crows.Close()
-				return decksImported, cardsImported, fmt.Errorf("import insert card: %w", err)
-			}
 			cardsImported++
 		}
 		crows.Close()
 	}
 
+	if err := tx.Commit(); err != nil {
+		return 0, 0, fmt.Errorf("import commit: %w", err)
+	}
 	return decksImported, cardsImported, nil
+}
+
+// --- Validation ---
+
+// ValidateLevel returns an error if level is outside 0-5.
+func ValidateLevel(level int) error {
+	if level < 0 || level > 5 {
+		return fmt.Errorf("level must be 0-5, got %d", level)
+	}
+	return nil
+}
+
+// ClampLevel constrains a level value to 0-5 for display purposes.
+func ClampLevel(level int) int {
+	if level < 0 {
+		return 0
+	}
+	if level > 5 {
+		return 5
+	}
+	return level
+}
+
+var validStatuses = map[string]bool{
+	"planned":     true,
+	"in_progress": true,
+	"completed":   true,
+	"abandoned":   true,
+}
+
+// ValidateStatus returns an error if status is not a valid scenario status.
+func ValidateStatus(status string) error {
+	if !validStatuses[status] {
+		return fmt.Errorf("status must be one of: planned, in_progress, completed, abandoned; got %q", status)
+	}
+	return nil
 }
 
 // --- Helpers ---

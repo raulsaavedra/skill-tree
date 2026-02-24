@@ -80,6 +80,9 @@ func skillCmd() *cobra.Command {
 			if name == "" {
 				return fmt.Errorf("--name is required")
 			}
+			if err := store.ValidateLevel(level); err != nil {
+				return err
+			}
 			st, err := openStore()
 			if err != nil {
 				return err
@@ -166,18 +169,12 @@ func skillCmd() *cobra.Command {
 			if jsonFlag {
 				return output.JSON(skill)
 			}
-			fmt.Printf("ID: %d\nName: %s\nLevel: %d/5\nDescription: %s\n", skill.ID, skill.Name, skill.Level, skill.Description)
-			if len(skill.Decks) > 0 {
-				fmt.Println("Decks:")
-				for _, d := range skill.Decks {
-					fmt.Printf("  %d: %s (%d cards)\n", d.ID, d.Name, d.CardCount)
-				}
-			}
-			if len(skill.Scenarios) > 0 {
-				fmt.Println("Scenarios:")
-				for _, sc := range skill.Scenarios {
-					fmt.Printf("  %d: %s [%s]\n", sc.ID, sc.Name, sc.Status)
-				}
+			fmt.Printf("ID: %d\nName: %s\nLevel: %d/5 %s\nDescription: %s\n",
+				skill.ID, skill.Name, skill.Level, tui.LevelLabel(skill.Level), skill.Description)
+			printSkillLinks(skill.Decks, skill.Scenarios, "")
+			for _, child := range skill.Children {
+				fmt.Printf("\n%s (%d/5 %s)\n", child.Name, child.Level, tui.LevelLabel(child.Level))
+				printSkillLinks(child.Decks, child.Scenarios, "  ")
 			}
 			return nil
 		},
@@ -204,6 +201,9 @@ func skillCmd() *cobra.Command {
 				u.Description = &description
 			}
 			if cmd.Flags().Changed("level") {
+				if err := store.ValidateLevel(level); err != nil {
+					return err
+				}
 				u.Level = &level
 			}
 			st, err := openStore()
@@ -399,6 +399,9 @@ func scenarioCmd() *cobra.Command {
 				u.RepoPath = &repo
 			}
 			if cmd.Flags().Changed("status") {
+				if err := store.ValidateStatus(status); err != nil {
+					return err
+				}
 				u.Status = &status
 			}
 			st, err := openStore()
@@ -525,7 +528,9 @@ func deckCmd() *cobra.Command {
 					return err
 				}
 				for _, sid := range skillIDs {
-					_ = st.LinkDeckSkill(deckID, sid)
+					if err := st.LinkDeckSkill(deckID, sid); err != nil {
+					return err
+				}
 				}
 				fmt.Printf("Created deck: %s\n", deckName)
 				return nil
@@ -547,7 +552,9 @@ func deckCmd() *cobra.Command {
 				return err
 			}
 			for _, sid := range skillIDs {
-				_ = st.LinkDeckSkill(deckID, sid)
+				if err := st.LinkDeckSkill(deckID, sid); err != nil {
+					return err
+				}
 			}
 			for idx, rawCard := range deckInput.Cards {
 				card, err := normalizeCard(rawCard)
@@ -1063,7 +1070,7 @@ func treeCmd() *cobra.Command {
 			}
 			defer st.Close()
 
-			skills, err := st.SkillTree()
+			ctx, err := st.FullContext()
 			if err != nil {
 				return err
 			}
@@ -1082,7 +1089,7 @@ func treeCmd() *cobra.Command {
 				cardsByDeck[deck.ID] = cards
 			}
 
-			model := tui.NewAppModel(skills, allDecks, cardsByDeck)
+			model := tui.NewAppModel(ctx.Skills, allDecks, cardsByDeck)
 			_, err = tea.NewProgram(model, tea.WithAltScreen()).Run()
 			return err
 		},
@@ -1310,29 +1317,32 @@ func formatUpdatedAt(raw string) string {
 	return value
 }
 
+func printSkillLinks(decks []store.Deck, scenarios []store.Scenario, indent string) {
+	if len(decks) > 0 {
+		fmt.Printf("%sDecks:\n", indent)
+		for _, d := range decks {
+			fmt.Printf("%s  %s (%d cards)\n", indent, d.Name, d.CardCount)
+		}
+	}
+	if len(scenarios) > 0 {
+		fmt.Printf("%sScenarios:\n", indent)
+		for _, sc := range scenarios {
+			fmt.Printf("%s  %s [%s]\n", indent, sc.Name, sc.Status)
+		}
+	}
+	if len(decks) == 0 && len(scenarios) == 0 {
+		fmt.Printf("%sNo decks or scenarios linked.\n", indent)
+	}
+}
+
 func printSkillTree(skills []store.Skill, depth int) {
 	for _, s := range skills {
 		indent := strings.Repeat("  ", depth)
-		bar := levelBar(s.Level)
-		fmt.Printf("%s%s %s %d/5 %s\n", indent, s.Name, bar, s.Level, levelLabel(s.Level))
+		fmt.Printf("%s%s %s %d/5 %s\n", indent, s.Name, tui.LevelBar(s.Level), s.Level, tui.LevelLabel(s.Level))
 		if len(s.Children) > 0 {
 			printSkillTree(s.Children, depth+1)
 		}
 	}
-}
-
-func levelBar(level int) string {
-	filled := level
-	empty := 5 - level
-	return strings.Repeat("█", filled) + strings.Repeat("░", empty)
-}
-
-func levelLabel(level int) string {
-	labels := []string{"Unexplored", "Awareness", "Guided", "Independent", "Proficient", "Expert"}
-	if level < 0 || level >= len(labels) {
-		return ""
-	}
-	return labels[level]
 }
 
 func findSkillByName(skills []store.Skill, name string) *store.Skill {

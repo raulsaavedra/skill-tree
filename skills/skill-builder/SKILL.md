@@ -40,12 +40,12 @@ This returns the full skill tree with levels, linked decks (with card counts), l
 
 | Level | Label | When to assign |
 |-------|-------|----------------|
-| 0 | Unexplored | Haven't touched it |
-| 1 | Awareness | Know the concept exists, can describe it |
-| 2 | Guided | Can do with docs/guidance open |
-| 3 | Independent | Can do solo without reference |
-| 4 | Proficient | Confident, could teach others |
-| 5 | Expert | Deep understanding, can debug edge cases |
+| 0 | Unaware | Haven't touched it |
+| 1 | Novice | Know the concept exists, can describe it |
+| 2 | Beginner | Can do with docs/guidance open |
+| 3 | Intermediate | Can do solo without reference |
+| 4 | Advanced | Confident, could teach others |
+| 5 | Elite | Deep understanding, can debug edge cases |
 
 ### Skill commands
 - Add a root skill:
@@ -225,11 +225,50 @@ Imports all decks and cards from `~/.quiz/quiz.db` into skill-builder. Skips dec
 
 ### Updating skill levels
 Update levels based on demonstrated proficiency during sessions:
-- After first exposure to a concept: level 1 (Awareness)
-- After working through it with docs open: level 2 (Guided)
-- After completing a scenario independently: level 3 (Independent)
-- After teaching/explaining it clearly: level 4 (Proficient)
-- After debugging complex edge cases: level 5 (Expert)
+- After first exposure to a concept: level 1 (Novice)
+- After working through it with docs open: level 2 (Beginner)
+- After completing a scenario independently: level 3 (Intermediate)
+- After teaching/explaining it clearly: level 4 (Advanced)
+- After debugging complex edge cases: level 5 (Elite)
+
+### Refining an existing deck
+1. Identify the deck:
+   - `skill-builder deck list`
+2. Inspect current cards:
+   - `skill-builder card list --deck-id <DECK_ID>`
+   - `skill-builder card show --deck-id <DECK_ID> --card-id <CARD_ID>`
+3. Edit cards:
+   - `skill-builder card update --deck-id <DECK_ID> --card-id <CARD_ID> --answer "Better answer" --extra "Clearer explanation"`
+4. Remove cards that are no longer needed:
+   - `skill-builder card delete --deck-id <DECK_ID> --card-id <CARD_ID>`
+   - `skill-builder card delete --deck-id <DECK_ID> --card-ids "50,51,52-55"`
+5. Add new cards as needed with `skill-builder card add`.
+
+### Study sessions
+When the learner is ready to study in the TUI, suggest the appropriate review command:
+- Understanding / first pass: `skill-builder review --deck "Deck Name" --mode flashcard`
+- Exam-style practice: `skill-builder review --deck "Deck Name" --mode mcq`
+- Mixed review: `skill-builder review --deck "Deck Name" --mode auto`
+- Skill-scoped review: `skill-builder review --skill "VPC"`
+
+## Tutoring with decks
+
+The learner runs `skill-builder review` in their own terminal and may ask for help understanding specific questions or topics.
+
+### How to tutor
+- Map what the learner reports (question text, options, or question number) to the corresponding card in the deck.
+- Use the card data as your starting point:
+  - `question`, `choices`, and `correct_index` describe how the TUI presents MCQs.
+  - `answer` and `extra` provide the canonical answer and explanation.
+- During tutoring you can:
+  - Confirm which option is correct.
+  - Explain why it is correct, using `answer` and `extra` as your starting point.
+  - Explain why other options are incorrect.
+
+### Tutoring modes you can offer in chat
+- **MCQ explanation**: When the learner describes a multiple-choice question and their chosen option, restate the scenario, identify the correct choice, and walk through the reasoning.
+- **Flashcard-style explanation**: When the learner wants to reason without seeing options, focus on the `question`, then reveal and explain `answer` and `extra` in your own words.
+- **Topic-focused help**: If the deck uses `tags`, and the learner wants to focus on specific areas (e.g., `networking`, `security`), prioritize questions with those tags when choosing which explanations to give.
 
 ## Writing effective MCQ cards
 
@@ -240,14 +279,20 @@ MCQ cards are most effective when the `extra` field explains:
 Example:
 ```json
 {
-  "question": "Which AWS service discovers PII in S3?",
+  "question": "A company stores patient records in S3. They need to automatically identify files containing PII. Which service should they use?",
   "answer": "Amazon Macie",
-  "extra": "**Macie = Sensitive Data Discovery in S3.**\n\n**Why others are wrong:**\n- **GuardDuty**: Detects threats, not data\n- **Inspector**: Scans for vulnerabilities\n- **Shield**: DDoS protection",
-  "choices": ["GuardDuty", "Macie", "Inspector", "Shield"],
+  "extra": "**Macie = Sensitive Data Discovery in S3.**\nUses ML to find PII, financial data, credentials, and healthcare data.\n\n**Why others are wrong:**\n- **GuardDuty**: Detects *threats* (malicious activity), not sensitive data\n- **Inspector**: Scans for *vulnerabilities* in EC2/containers, not data content\n- **Shield**: Provides *DDoS protection*, unrelated to data classification\n\n**Remember**: Macie = data classification; GuardDuty = threat detection; Inspector = vulnerability scanning",
+  "choices": ["Amazon GuardDuty", "Amazon Macie", "Amazon Inspector", "AWS Shield"],
   "correctIndex": 1,
-  "tags": ["security", "s3"]
+  "tags": ["security", "s3", "data-protection"]
 }
 ```
+
+**Key patterns for the `extra` field:**
+- Start with a memorable one-liner for the correct answer
+- Use `**bold**` for service names and key concepts
+- Explicitly address each wrong option
+- End with a discrimination mnemonic if helpful
 
 ## Notes
 - The CLI does not call LLMs or external APIs; it operates on local SQLite data.

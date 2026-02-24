@@ -939,7 +939,59 @@ func TestUpdateSkillMissing(t *testing.T) {
 	}
 }
 
-// --- 12. TestImportFromQuiz ---
+// --- 12. TestValidateLevel ---
+
+func TestValidateLevel(t *testing.T) {
+	t.Parallel()
+
+	for _, valid := range []int{0, 1, 2, 3, 4, 5} {
+		if err := ValidateLevel(valid); err != nil {
+			t.Fatalf("ValidateLevel(%d) should pass: %v", valid, err)
+		}
+	}
+	for _, invalid := range []int{-1, 6, 100, -10} {
+		if err := ValidateLevel(invalid); err == nil {
+			t.Fatalf("ValidateLevel(%d) should fail", invalid)
+		}
+	}
+}
+
+// --- 13. TestClampLevel ---
+
+func TestClampLevel(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		in, want int
+	}{
+		{-5, 0}, {0, 0}, {3, 3}, {5, 5}, {6, 5}, {100, 5},
+	}
+	for _, tc := range cases {
+		got := ClampLevel(tc.in)
+		if got != tc.want {
+			t.Fatalf("ClampLevel(%d) = %d, want %d", tc.in, got, tc.want)
+		}
+	}
+}
+
+// --- 14. TestValidateStatus ---
+
+func TestValidateStatus(t *testing.T) {
+	t.Parallel()
+
+	for _, valid := range []string{"planned", "in_progress", "completed", "abandoned"} {
+		if err := ValidateStatus(valid); err != nil {
+			t.Fatalf("ValidateStatus(%q) should pass: %v", valid, err)
+		}
+	}
+	for _, invalid := range []string{"", "foo", "PLANNED", "done"} {
+		if err := ValidateStatus(invalid); err == nil {
+			t.Fatalf("ValidateStatus(%q) should fail", invalid)
+		}
+	}
+}
+
+// --- 15. TestImportFromQuiz ---
 
 func TestImportFromQuiz(t *testing.T) {
 	t.Parallel()

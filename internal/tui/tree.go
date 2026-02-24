@@ -10,14 +10,36 @@ import (
 	"github.com/raulsaavedra/skill-builder/internal/store"
 )
 
+// LevelLabel returns the human-readable label for a skill level (0-5).
+func LevelLabel(level int) string {
+	level = store.ClampLevel(level)
+	return levelLabels[level]
+}
+
+// LevelBar returns the 5-char visual bar for a skill level (plain text, no color).
+func LevelBar(level int) string {
+	level = store.ClampLevel(level)
+	return strings.Repeat("█", level) + strings.Repeat("░", 5-level)
+}
+
 // Level labels indexed by skill level 0-5.
 var levelLabels = []string{
-	"Unexplored",
-	"Awareness",
-	"Guided",
-	"Independent",
-	"Proficient",
-	"Expert",
+	"Unaware",
+	"Novice",
+	"Beginner",
+	"Intermediate",
+	"Advanced",
+	"Elite",
+}
+
+// Level descriptions indexed by skill level 0-5.
+var levelDescriptions = []string{
+	"Haven't touched it",
+	"Know the concept exists, can describe it",
+	"Can do with docs/guidance open",
+	"Can do solo without reference",
+	"Confident, could teach others",
+	"Deep understanding, can debug edge cases",
 }
 
 // Level bar colors indexed by skill level 0-5.
@@ -45,11 +67,20 @@ type treeStage int
 const (
 	stageTree treeStage = iota
 	stageSkillDetail
+	stageLevelHelp
 )
 
 type flatNode struct {
 	skill store.Skill
 	depth int
+}
+
+type detailSection struct {
+	name      string
+	level     int
+	deckStart int // index into detailDecks
+	deckCount int
+	scenarios []store.Scenario
 }
 
 // TreeModel manages the skill tree navigation and detail views.
@@ -60,6 +91,7 @@ type TreeModel struct {
 	expanded  map[int64]bool
 	selected  *store.Skill
 	stage     treeStage
+	prevStage treeStage // for returning from level help
 	width     int
 	err       error
 
@@ -70,6 +102,7 @@ type TreeModel struct {
 	// Skill detail state.
 	detailCursor    int
 	detailDecks     []store.Deck
+	detailSections  []detailSection // groups decks/scenarios by skill
 	detailScenarios []store.Scenario
 }
 
@@ -115,6 +148,8 @@ func (m TreeModel) Update(msg tea.Msg) (TreeModel, tea.Cmd) {
 			return m.updateTree(msg)
 		case stageSkillDetail:
 			return m.updateDetail(msg)
+		case stageLevelHelp:
+			return m.updateLevelHelp(msg)
 		}
 	}
 	return m, nil
@@ -127,6 +162,8 @@ func (m TreeModel) View() string {
 	switch m.stage {
 	case stageSkillDetail:
 		return m.renderDetail()
+	case stageLevelHelp:
+		return m.renderLevelHelp()
 	default:
 		return m.renderTree()
 	}
@@ -155,6 +192,13 @@ func (m TreeModel) updateTree(msg tea.KeyMsg) (TreeModel, tea.Cmd) {
 				if m.cursor >= len(m.flatNodes) {
 					m.cursor = len(m.flatNodes) - 1
 				}
+			} else {
+				// Leaf node: open detail.
+				skill := node.skill
+				m.selected = &skill
+				m.stage = stageSkillDetail
+				m.detailCursor = 0
+				m.loadDetailData(skill)
 			}
 		}
 	case "d":
@@ -165,13 +209,48 @@ func (m TreeModel) updateTree(msg tea.KeyMsg) (TreeModel, tea.Cmd) {
 			m.detailCursor = 0
 			m.loadDetailData(skill)
 		}
+	case "?":
+		m.prevStage = stageTree
+		m.stage = stageLevelHelp
 	}
 	return m, nil
 }
 
 func (m *TreeModel) loadDetailData(skill store.Skill) {
-	m.detailDecks = skill.Decks
-	m.detailScenarios = skill.Scenarios
+	m.detailDecks = nil
+	m.detailSections = nil
+	m.detailScenarios = nil
+
+	// Add the skill's own decks/scenarios if any.
+	if len(skill.Decks) > 0 || len(skill.Scenarios) > 0 {
+		sec := detailSection{
+			name:      skill.Name,
+			level:     skill.Level,
+			deckStart: len(m.detailDecks),
+			deckCount: len(skill.Decks),
+			scenarios: skill.Scenarios,
+		}
+		m.detailDecks = append(m.detailDecks, skill.Decks...)
+		m.detailScenarios = append(m.detailScenarios, skill.Scenarios...)
+		m.detailSections = append(m.detailSections, sec)
+	}
+
+	// Add children's decks/scenarios as subsections.
+	for _, child := range skill.Children {
+		if len(child.Decks) == 0 && len(child.Scenarios) == 0 {
+			continue
+		}
+		sec := detailSection{
+			name:      child.Name,
+			level:     child.Level,
+			deckStart: len(m.detailDecks),
+			deckCount: len(child.Decks),
+			scenarios: child.Scenarios,
+		}
+		m.detailDecks = append(m.detailDecks, child.Decks...)
+		m.detailScenarios = append(m.detailScenarios, child.Scenarios...)
+		m.detailSections = append(m.detailSections, sec)
+	}
 }
 
 // --- Skill detail navigation ---
@@ -193,6 +272,9 @@ func (m TreeModel) updateDetail(msg tea.KeyMsg) (TreeModel, tea.Cmd) {
 		}
 	case "r":
 		// handled by AppModel — returns with detail state intact
+	case "?":
+		m.prevStage = stageSkillDetail
+		m.stage = stageLevelHelp
 	}
 	return m, nil
 }
@@ -232,7 +314,7 @@ func (m TreeModel) renderTree() string {
 	}
 
 	lines = append(lines, "")
-	lines = append(lines, lipgloss.NewStyle().Faint(true).Render("j/k Navigate  enter Expand/Collapse  d Detail  q Quit"))
+	lines = append(lines, lipgloss.NewStyle().Faint(true).Render("j/k Navigate  enter Expand/Collapse  d Detail  ? Levels  q Quit"))
 	return renderWithHorizontalPadding(lines, m.width)
 }
 
@@ -256,13 +338,7 @@ func (m TreeModel) renderTreeNode(index int, node flatNode) string {
 	}
 
 	// Level bar and label.
-	level := node.skill.Level
-	if level < 0 {
-		level = 0
-	}
-	if level > 5 {
-		level = 5
-	}
+	level := store.ClampLevel(node.skill.Level)
 	bar := renderLevelBar(level)
 	label := levelLabels[level]
 
@@ -336,6 +412,36 @@ func padRight(s string, width int) string {
 	return s + strings.Repeat(" ", width-visible)
 }
 
+// --- Level help ---
+
+func (m TreeModel) updateLevelHelp(msg tea.KeyMsg) (TreeModel, tea.Cmd) {
+	switch msg.String() {
+	case "q", "ctrl+c":
+		return m, tea.Quit
+	case "b", "esc", "?":
+		m.stage = m.prevStage
+	}
+	return m, nil
+}
+
+func (m TreeModel) renderLevelHelp() string {
+	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("14")).Render("Skill Levels")
+	lines := []string{title, ""}
+
+	for i := 0; i < len(levelLabels); i++ {
+		bar := renderLevelBar(i)
+		label := lipgloss.NewStyle().Foreground(lipgloss.Color(levelColors[i])).Bold(true).Render(
+			fmt.Sprintf("%-12s", levelLabels[i]),
+		)
+		desc := lipgloss.NewStyle().Faint(true).Render(levelDescriptions[i])
+		lines = append(lines, fmt.Sprintf("  %d  %s  %s  %s", i, bar, label, desc))
+	}
+
+	lines = append(lines, "")
+	lines = append(lines, lipgloss.NewStyle().Faint(true).Render("b Back  q Quit"))
+	return renderWithHorizontalPadding(lines, m.width)
+}
+
 // --- Detail rendering ---
 
 func (m TreeModel) renderDetail() string {
@@ -344,61 +450,98 @@ func (m TreeModel) renderDetail() string {
 	}
 
 	skill := m.selected
-	level := skill.Level
-	if level < 0 {
-		level = 0
-	}
-	if level > 5 {
-		level = 5
-	}
+	level := store.ClampLevel(skill.Level)
 
 	// Header.
 	nameStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("14"))
 	levelStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(levelColors[level]))
+	bar := renderLevelBar(level)
 	header := nameStyle.Render(skill.Name) + "    " +
-		levelStyle.Render(fmt.Sprintf("Level: %d/5 %s", level, levelLabels[level]))
+		levelStyle.Render(fmt.Sprintf("%s %d/5 %s", bar, level, levelLabels[level]))
 
 	lines := []string{header}
 	if skill.Description != "" {
 		lines = append(lines, lipgloss.NewStyle().Faint(true).Render(skill.Description))
 	}
-	lines = append(lines, "")
 
-	// Decks section.
-	lines = append(lines, lipgloss.NewStyle().Bold(true).Render("Decks"))
-	if len(m.detailDecks) == 0 {
-		lines = append(lines, "  No decks linked to this skill.")
-	} else {
-		for i, d := range m.detailDecks {
-			prefix := "    "
-			style := lipgloss.NewStyle()
-			if i == m.detailCursor {
-				prefix = "  > "
-				style = style.Foreground(lipgloss.Color("13")).Bold(true)
+	hasChildren := len(skill.Children) > 0
+
+	if len(m.detailDecks) == 0 && len(m.detailScenarios) == 0 {
+		lines = append(lines, "")
+		lines = append(lines, "  No decks or scenarios linked.")
+	} else if !hasChildren {
+		// Leaf skill: flat rendering, no section headers.
+		lines = append(lines, "")
+		if len(m.detailDecks) > 0 {
+			lines = append(lines, lipgloss.NewStyle().Bold(true).Render("Decks"))
+			for i, d := range m.detailDecks {
+				prefix := "    "
+				style := lipgloss.NewStyle()
+				if i == m.detailCursor {
+					prefix = "  > "
+					style = style.Foreground(lipgloss.Color("13")).Bold(true)
+				}
+				cardInfo := lipgloss.NewStyle().Faint(true).Render(fmt.Sprintf("%d cards", d.CardCount))
+				lines = append(lines, style.Render(prefix+d.Name)+"  "+cardInfo)
 			}
-			cardInfo := lipgloss.NewStyle().Faint(true).Render(fmt.Sprintf("%d cards", d.CardCount))
-			lines = append(lines, style.Render(prefix+d.Name)+"  "+cardInfo)
 		}
-	}
-	lines = append(lines, "")
-
-	// Scenarios section.
-	lines = append(lines, lipgloss.NewStyle().Bold(true).Render("Scenarios"))
-	if len(m.detailScenarios) == 0 {
-		lines = append(lines, "  No scenarios linked to this skill.")
-	} else {
-		for _, s := range m.detailScenarios {
-			icon := statusIcons[s.Status]
-			if icon == "" {
-				icon = "○"
+		if len(m.detailScenarios) > 0 {
+			lines = append(lines, "")
+			lines = append(lines, lipgloss.NewStyle().Bold(true).Render("Scenarios"))
+			for _, s := range m.detailScenarios {
+				icon := statusIcons[s.Status]
+				if icon == "" {
+					icon = "○"
+				}
+				lines = append(lines, fmt.Sprintf("  %s %s", icon, s.Name))
 			}
-			lines = append(lines, fmt.Sprintf("    %s %s", icon, s.Name))
+		}
+	} else {
+		// Parent skill: sectioned rendering by child.
+		sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("14"))
+		for _, sec := range m.detailSections {
+			lines = append(lines, "")
+			secLevel := store.ClampLevel(sec.level)
+			secBar := renderLevelBar(secLevel)
+			secHeader := sectionStyle.Render(sec.name) + "  " +
+				lipgloss.NewStyle().Foreground(lipgloss.Color(levelColors[secLevel])).Render(
+					fmt.Sprintf("%s %d/5 %s", secBar, secLevel, levelLabels[secLevel]),
+				)
+			lines = append(lines, secHeader)
+
+			// Decks subsection (only if present).
+			if sec.deckCount > 0 {
+				lines = append(lines, lipgloss.NewStyle().Faint(true).Render("  Decks:"))
+				for i := sec.deckStart; i < sec.deckStart+sec.deckCount; i++ {
+					d := m.detailDecks[i]
+					prefix := "      "
+					style := lipgloss.NewStyle()
+					if i == m.detailCursor {
+						prefix = "    > "
+						style = style.Foreground(lipgloss.Color("13")).Bold(true)
+					}
+					cardInfo := lipgloss.NewStyle().Faint(true).Render(fmt.Sprintf("%d cards", d.CardCount))
+					lines = append(lines, style.Render(prefix+d.Name)+"  "+cardInfo)
+				}
+			}
+
+			// Scenarios subsection (only if present).
+			if len(sec.scenarios) > 0 {
+				lines = append(lines, lipgloss.NewStyle().Faint(true).Render("  Scenarios:"))
+				for _, s := range sec.scenarios {
+					icon := statusIcons[s.Status]
+					if icon == "" {
+						icon = "○"
+					}
+					lines = append(lines, fmt.Sprintf("    %s %s", icon, s.Name))
+				}
+			}
 		}
 	}
 	lines = append(lines, "")
 
 	// Help.
-	help := "r Review deck  b Back  q Quit"
+	help := "j/k Navigate  r Review deck  ? Levels  b Back  q Quit"
 	lines = append(lines, lipgloss.NewStyle().Faint(true).Render(help))
 	return renderWithHorizontalPadding(lines, m.width)
 }

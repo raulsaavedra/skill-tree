@@ -55,6 +55,7 @@ type ReviewModel struct {
 	err          error
 	width        int
 	done         bool
+	fromTree     bool
 }
 
 // NewReviewModel creates a ReviewModel. If startInReview is true, the selected
@@ -90,6 +91,7 @@ func NewReviewModel(
 		stage:       stageDeckSelect,
 	}
 	if startInReview {
+		m.fromTree = true
 		m.activateDeck(selectedDeck)
 		if len(m.cards) == 0 {
 			m.stage = stageDone
@@ -175,13 +177,17 @@ func (m ReviewModel) updateDone(msg tea.KeyMsg) ReviewModel {
 	case "q", "esc":
 		m.done = true
 	case "b":
-		if len(m.decks) > 0 {
+		if m.fromTree {
+			m.done = true
+		} else if len(m.decks) > 0 {
 			m.stage = stageDeckSelect
 		} else {
 			m.done = true
 		}
 	case "enter", " ":
-		if len(m.decks) > 0 {
+		if m.fromTree {
+			m.done = true
+		} else if len(m.decks) > 0 {
 			m.stage = stageDeckSelect
 		}
 	}
@@ -192,7 +198,9 @@ func (m ReviewModel) updateReview(msg tea.KeyMsg) ReviewModel {
 	if len(m.cards) == 0 {
 		switch msg.String() {
 		case "b":
-			if len(m.decks) > 0 {
+			if m.fromTree {
+				m.done = true
+			} else if len(m.decks) > 0 {
 				m.stage = stageDeckSelect
 			}
 		case "q", "esc":
@@ -206,6 +214,10 @@ func (m ReviewModel) updateReview(msg tea.KeyMsg) ReviewModel {
 		m.done = true
 		return m
 	case "b":
+		if m.fromTree {
+			m.done = true
+			return m
+		}
 		if len(m.decks) > 0 {
 			m.stage = stageDeckSelect
 			return m
@@ -447,15 +459,56 @@ func (m ReviewModel) renderMCQ(card store.Card) []string {
 }
 
 func (m ReviewModel) renderPagination() string {
-	dots := make([]string, 0, len(m.cards))
-	for i := range m.cards {
-		style := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+	total := len(m.cards)
+	if total == 0 {
+		return ""
+	}
+
+	const maxDots = 40
+	if total <= maxDots {
+		dots := make([]string, 0, total)
+		for i := range m.cards {
+			style := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+			if i == m.cardCursor {
+				style = lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Bold(true)
+			}
+			dots = append(dots, style.Render("•"))
+		}
+		return strings.Join(dots, "")
+	}
+
+	// Sliding window: show maxDots dots centered on cursor with ellipsis
+	half := maxDots / 2
+	start := m.cardCursor - half
+	end := start + maxDots
+	if start < 0 {
+		start = 0
+		end = maxDots
+	}
+	if end > total {
+		end = total
+		start = total - maxDots
+		if start < 0 {
+			start = 0
+		}
+	}
+
+	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+	var parts []string
+	if start > 0 {
+		parts = append(parts, dim.Render("…"))
+	}
+	for i := start; i < end; i++ {
+		style := dim
 		if i == m.cardCursor {
 			style = lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Bold(true)
 		}
-		dots = append(dots, style.Render("•"))
+		parts = append(parts, style.Render("•"))
 	}
-	return strings.Join(dots, "")
+	if end < total {
+		parts = append(parts, dim.Render("…"))
+	}
+	return strings.Join(parts, "")
 }
 
 func (m ReviewModel) renderAnswer(card store.Card) []string {
