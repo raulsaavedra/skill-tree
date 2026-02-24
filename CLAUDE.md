@@ -1,25 +1,40 @@
 # skill-builder
 
-## Overview
-Unified learning CLI: skill tree + quiz decks + hands-on scenarios in one tool.
-Cobra + BubbleTea + SQLite, using cli-core for shared utilities.
-
 ## Layout
-- `cmd/skill-builder/main.go`: CLI entry + all Cobra commands
-- `internal/store/store.go`: SQLite schema + all CRUD
-- `internal/tui/tree.go`: Skill tree TUI
-- `internal/tui/review.go`: Card review TUI (from quiz)
-- `internal/tui/markdown.go`: Shared markdown rendering
-- `skills/skill-builder/SKILL.md`: Claude skill definition
 
-## Build & Install
+- `cmd/skill-builder/main.go` — CLI entry point, all Cobra commands
+- `internal/store/store.go` — SQLite schema, migrations, all CRUD operations
+- `internal/store/store_test.go` — Store tests (run with `go test ./...`)
+- `internal/tui/tree.go` — Skill tree TUI (navigation, detail view, level help)
+- `internal/tui/review.go` — Card review TUI (flashcard/MCQ/auto modes)
+- `internal/tui/markdown.go` — Shared rendering utilities (markdown, padding)
+- `skills/skill-builder/SKILL.md` — Claude skill definition (installed to ~/.claude/skills/)
+- `install.sh` — Builds binary to ~/.local/bin/skill-builder
+
+## Build & test
+
 ```
-./install.sh
+./install.sh          # build + install
+go test ./...         # run store tests
+go build ./...        # compile check
 ```
 
-## Data
-- SQLite DB at `~/.skill-builder/skill-builder.db`
-- Import quiz data: `skill-builder import --from-quiz`
+## Dependencies
 
-## Commands
-- Always use single-line commands (no backslash continuations)
+- Uses `cli-core` from `../packages/cli-core` (local replace in go.mod)
+- Part of the Go workspace at `~/src/go.work`
+
+## Conventions
+
+- Always use single-line commands (no backslash continuations) for CLI operations
+- Input validation: `store.ValidateLevel()` for levels 0-5, `store.ValidateStatus()` for scenario status
+- Multi-statement writes use transactions (`db.Begin()` / `tx.Commit()` / `defer tx.Rollback()`)
+- Exported TUI helpers (`tui.LevelLabel()`, `tui.LevelBar()`) are reused by CLI print functions
+- Database lives at `~/.skill-builder/skill-builder.db`, opened via `sqliteutil.OpenSQLite()`
+
+## Data model
+
+- **Skills** — hierarchical tree (parent_id), level 0-5, linked to decks and scenarios via junction tables
+- **Decks** — contain cards, linked to skills via `deck_skills`
+- **Cards** — belong to a deck, support question/answer/extra/choices/tags
+- **Scenarios** — track hands-on work, linked to skills via `scenario_skills`, have status progression
