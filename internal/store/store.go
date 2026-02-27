@@ -721,6 +721,18 @@ func (s *Store) CoveredCardIDs(cardIDs []int64) (map[int64]bool, error) {
 	return out, rows.Err()
 }
 
+// CompleteDeckCoverage marks all cards in a deck as covered.
+func (s *Store) CompleteDeckCoverage(deckID int64) error {
+	_, err := s.DB.Exec(`
+		INSERT OR IGNORE INTO card_coverage(card_id)
+		SELECT id FROM cards WHERE deck_id = ?
+	`, deckID)
+	if err != nil {
+		return fmt.Errorf("complete deck coverage %d: %w", deckID, err)
+	}
+	return nil
+}
+
 // ResetDeckCoverage deletes all coverage records for cards in a deck.
 func (s *Store) ResetDeckCoverage(deckID int64) error {
 	_, err := s.DB.Exec(`

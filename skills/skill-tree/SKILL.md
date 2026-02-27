@@ -127,6 +127,9 @@ This returns the full skill tree with levels, linked decks (with card counts), l
 - Reset coverage for a deck:
   - `skill-tree deck reset-coverage --deck-id 1`
   - `skill-tree deck reset-coverage --deck-name "VPC Quiz"`
+- Complete coverage for a deck (mark all cards covered):
+  - `skill-tree deck complete-coverage --deck-id 1`
+  - `skill-tree deck complete-coverage --deck-name "VPC Quiz"`
 - Link/unlink a deck to a skill:
   - `skill-tree deck link --deck-id 1 --skill-id 2`
   - `skill-tree deck unlink --deck-id 1 --skill-id 2`

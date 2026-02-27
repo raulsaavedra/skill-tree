@@ -718,7 +718,38 @@ func deckCmd() *cobra.Command {
 	resetCoverage.Flags().Int64("deck-id", 0, "Deck ID")
 	resetCoverage.Flags().String("deck-name", "", "Deck name")
 
-	cmd.AddCommand(create, list, del, link, unlink, resetCoverage)
+	completeCoverage := &cobra.Command{
+		Use:   "complete-coverage",
+		Short: "Mark all cards in a deck as covered",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			deckID, _ := cmd.Flags().GetInt64("deck-id")
+			deckName, _ := cmd.Flags().GetString("deck-name")
+			st, err := openStore()
+			if err != nil {
+				return err
+			}
+			defer st.Close()
+			if deckID == 0 && deckName == "" {
+				return fmt.Errorf("either --deck-id or --deck-name is required")
+			}
+			if deckID == 0 {
+				deck, err := st.GetDeckByName(deckName)
+				if err != nil {
+					return err
+				}
+				deckID = deck.ID
+			}
+			if err := st.CompleteDeckCoverage(deckID); err != nil {
+				return err
+			}
+			fmt.Printf("Completed coverage for deck %d\n", deckID)
+			return nil
+		},
+	}
+	completeCoverage.Flags().Int64("deck-id", 0, "Deck ID")
+	completeCoverage.Flags().String("deck-name", "", "Deck name")
+
+	cmd.AddCommand(create, list, del, link, unlink, resetCoverage, completeCoverage)
 	return cmd
 }
 

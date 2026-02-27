@@ -507,6 +507,10 @@ func (m ReviewModel) renderMCQ(card store.Card) []string {
 		}
 
 		style := lipgloss.NewStyle()
+		if m.width > 0 {
+			pad := horizontalPadding(m.width)
+			style = style.Width(m.width - 2*pad)
+		}
 		if m.showAnswer && card.CorrectIndex != nil && *card.CorrectIndex == i {
 			style = style.Foreground(lipgloss.Color("10")).Bold(true)
 		} else if m.showAnswer && selected {
@@ -521,11 +525,15 @@ func (m ReviewModel) renderMCQ(card store.Card) []string {
 }
 
 func (m ReviewModel) dotStyle(cardIndex int) lipgloss.Style {
+	covered := cardIndex >= 0 && cardIndex < len(m.cards) && m.coveredIDs[m.cards[cardIndex].ID]
 	if cardIndex == m.cardCursor {
+		if covered {
+			return lipgloss.NewStyle().Foreground(lipgloss.Color("10")).Bold(true)
+		}
 		return lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Bold(true)
 	}
-	if cardIndex >= 0 && cardIndex < len(m.cards) && m.coveredIDs[m.cards[cardIndex].ID] {
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
+	if covered {
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("28"))
 	}
 	return lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 }
