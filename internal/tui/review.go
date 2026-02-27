@@ -253,24 +253,12 @@ func (m ReviewModel) updateReview(msg tea.KeyMsg) ReviewModel {
 		m.mode = ModeMCQ
 	case "a":
 		m.mode = ModeAuto
-	case "x":
-		// Advance without marking coverage.
-		if m.showAnswer {
-			if m.cardCursor >= len(m.cards)-1 {
-				m.stage = stageDone
-				return m
-			}
-			m.nextCard()
-			return m
-		}
 	case "enter", " ":
 		if m.showAnswer {
-			// Mark card covered (flashcard implicit, MCQ already scored on reveal).
-			if m.currentEffectiveMode() == ModeFlashcard {
-				card := m.currentCard()
-				if card != nil && m.st != nil {
-					_ = m.st.MarkCardCovered(card.ID)
-				}
+			// Mark card covered: flashcard always, MCQ already scored on reveal.
+			card := m.currentCard()
+			if card != nil && m.st != nil {
+				_ = m.st.MarkCardCovered(card.ID)
 			}
 			if m.cardCursor >= len(m.cards)-1 {
 				m.stage = stageDone
@@ -474,9 +462,9 @@ func (m ReviewModel) renderReview() string {
 
 	var help string
 	if m.currentEffectiveMode() == ModeMCQ {
-		help = "enter/space: reveal->next | j/k: choice | n/p: next/prev | N/P: jump 10 | x: skip | f/m/a: mode | q: quit"
+		help = "enter/space: reveal->next | j/k: choice | n/p: next/prev | N/P: jump 10 | f/m/a: mode | q: quit"
 	} else {
-		help = "enter/space: reveal->next | n/p: next/prev | N/P: jump 10 | x: skip | f/m/a: mode | q: quit"
+		help = "enter/space: reveal->next | n/p: next/prev | N/P: jump 10 | f/m/a: mode | q: quit"
 	}
 	if len(m.decks) > 1 {
 		help += " | b: decks"
