@@ -1,14 +1,16 @@
 ---
 name: skill-tree
-description: Unified learning CLI — skill tree, quiz decks, and hands-on scenarios in one tool. Use at session start to load learning context.
+description: Learning tutor — teaches in-chat using skill-tree to track proficiency, create quizzes, and guide hands-on scenarios.
 ---
 
 ## Overview
-- `skill-tree` is a unified learning CLI that tracks skills (hierarchical tree with levels), quiz decks (flashcard/MCQ review), and hands-on scenarios.
-- All data is stored in a local SQLite database. The CLI does not call LLMs or external APIs.
-- Skills, decks, cards, and scenarios are managed via CLI commands; SQLite is the canonical store.
-- Review is TUI-only and supports flashcard, MCQ, and auto modes.
-- Decks and scenarios can be linked to skills to show learning activities per skill.
+- You are a **tutor**. You teach in-chat: explain concepts, work through examples, answer questions, and build understanding through conversation.
+- `skill-tree` is your toolkit. It stores skills (hierarchical tree with proficiency levels 0-5), quiz decks (flashcard/MCQ cards), and hands-on scenarios — all in local SQLite.
+- At session start, load the skill tree to understand where the learner stands and what to teach next.
+- As you teach, create or update quiz cards to capture key concepts for retrieval practice.
+- Create scenarios when a topic benefits from hands-on work.
+- Update skill levels as the learner demonstrates proficiency.
+- You can read and help with any existing deck, card, or scenario via the CLI — whether you created it or not.
 
 ## Important: Command Format
 - **Always use single-line commands** for all skill-tree CLI operations.
@@ -192,7 +194,7 @@ The `answer` and `extra` fields support markdown formatting in the TUI:
 ```
 skill-tree tree
 ```
-Interactive skill tree navigator. Navigate with `j`/`k`, expand/collapse with `enter`, press `d` for skill detail (shows linked decks and scenarios), `r` to start a review from detail view, `b` to go back, `q` to quit.
+Interactive skill tree navigator. Navigate with `j`/`k`, expand/collapse with `enter`. Press `d` for skill detail (shows linked decks and scenarios), `enter` to start a review from detail view, `t` for test mode (shuffled cards from skill + children), `/` to search skills, `b` to go back, `q` to quit.
 
 ## Import from quiz CLI
 ```
@@ -215,13 +217,11 @@ Imports all decks and cards from `~/.quiz/quiz.db` into skill-tree. Skips decks 
 
 ### Running a learning session
 1. Load context: `skill-tree context --json`
-2. Pick an active scenario or create one.
-3. Start scenario: `skill-tree scenario update --id 1 --status in_progress`
-4. Work through the scenario hands-on with Claude as tutor.
-5. Create/update quiz cards based on what was learned.
+2. Identify what to work on: look at skill levels, find gaps, or follow the learner's request.
+3. Teach in-chat: explain the topic, work through examples, answer questions.
+4. Capture learning: create or update quiz cards for key concepts taught.
+5. Create a scenario if the topic benefits from hands-on practice.
 6. Update skill levels as proficiency grows: `skill-tree skill update --id 3 --level 2`
-7. Complete scenario: `skill-tree scenario update --id 1 --status completed`
-8. Review cards: `skill-tree review --skill "VPC"`
 
 ### Updating skill levels
 Update levels based on demonstrated proficiency during sessions:
@@ -244,31 +244,12 @@ Update levels based on demonstrated proficiency during sessions:
    - `skill-tree card delete --deck-id <DECK_ID> --card-ids "50,51,52-55"`
 5. Add new cards as needed with `skill-tree card add`.
 
-### Study sessions
-When the learner is ready to study in the TUI, suggest the appropriate review command:
-- Understanding / first pass: `skill-tree review --deck "Deck Name" --mode flashcard`
-- Exam-style practice: `skill-tree review --deck "Deck Name" --mode mcq`
-- Mixed review: `skill-tree review --deck "Deck Name" --mode auto`
-- Skill-scoped review: `skill-tree review --skill "VPC"`
-
-## Tutoring with decks
-
-The learner runs `skill-tree review` in their own terminal and may ask for help understanding specific questions or topics.
-
-### How to tutor
-- Map what the learner reports (question text, options, or question number) to the corresponding card in the deck.
-- Use the card data as your starting point:
-  - `question`, `choices`, and `correct_index` describe how the TUI presents MCQs.
-  - `answer` and `extra` provide the canonical answer and explanation.
-- During tutoring you can:
-  - Confirm which option is correct.
-  - Explain why it is correct, using `answer` and `extra` as your starting point.
-  - Explain why other options are incorrect.
-
-### Tutoring modes you can offer in chat
-- **MCQ explanation**: When the learner describes a multiple-choice question and their chosen option, restate the scenario, identify the correct choice, and walk through the reasoning.
-- **Flashcard-style explanation**: When the learner wants to reason without seeing options, focus on the `question`, then reveal and explain `answer` and `extra` in your own words.
-- **Topic-focused help**: If the deck uses `tags`, and the learner wants to focus on specific areas (e.g., `networking`, `security`), prioritize questions with those tags when choosing which explanations to give.
+### TUI review
+When the learner wants to practice retrieval in the TUI:
+- First pass: `skill-tree review --deck "Deck Name" --mode flashcard`
+- Exam practice: `skill-tree review --deck "Deck Name" --mode mcq`
+- Mixed: `skill-tree review --deck "Deck Name" --mode auto`
+- Skill-scoped: `skill-tree review --skill "VPC"`
 
 ## Writing effective MCQ cards
 
