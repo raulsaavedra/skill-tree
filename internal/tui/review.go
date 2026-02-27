@@ -553,12 +553,25 @@ func (m ReviewModel) renderAnswer(card store.Card) []string {
 	answer := answerText(card)
 	answerHeader := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("10")).Render("Answer")
 	lines := []string{answerHeader}
-	lines = append(lines, renderMarkdown(answer, lipgloss.NewStyle().Foreground(lipgloss.Color("10")))...)
+	lines = append(lines, m.wrapLines(renderMarkdown(answer, lipgloss.NewStyle().Foreground(lipgloss.Color("10"))))...)
 	if strings.TrimSpace(card.Extra) != "" {
 		lines = append(lines, "")
-		lines = append(lines, renderMarkdown(card.Extra, lipgloss.NewStyle())...)
+		lines = append(lines, m.wrapLines(renderMarkdown(card.Extra, lipgloss.NewStyle()))...)
 	}
 	return lines
+}
+
+func (m ReviewModel) wrapLines(lines []string) []string {
+	if m.width <= 0 {
+		return lines
+	}
+	pad := horizontalPadding(m.width)
+	w := m.width - 2*pad
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		out = append(out, lipgloss.NewStyle().Width(w).Render(line))
+	}
+	return out
 }
 
 func (m ReviewModel) renderQuestion(question string) string {
