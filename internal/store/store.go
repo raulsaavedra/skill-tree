@@ -693,6 +693,18 @@ func (s *Store) DeckCoverage(deckID int64) (int, int, error) {
 	return covered, total, nil
 }
 
+// ResetDeckCoverage deletes all coverage records for cards in a deck.
+func (s *Store) ResetDeckCoverage(deckID int64) error {
+	_, err := s.DB.Exec(`
+		DELETE FROM card_coverage
+		WHERE card_id IN (SELECT id FROM cards WHERE deck_id = ?)
+	`, deckID)
+	if err != nil {
+		return fmt.Errorf("reset deck coverage %d: %w", deckID, err)
+	}
+	return nil
+}
+
 // --- Card CRUD ---
 
 func (s *Store) InsertCard(deckID int64, card Card) (int64, error) {

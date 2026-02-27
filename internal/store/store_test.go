@@ -1307,3 +1307,61 @@ func TestCardCoverageDeckDelete(t *testing.T) {
 		t.Fatalf("card_coverage count after deck delete = %d, want 0", count)
 	}
 }
+
+// --- 19. TestResetDeckCoverage ---
+
+func TestResetDeckCoverage(t *testing.T) {
+	t.Parallel()
+
+	st := openTempStore(t)
+
+	deckID, err := st.CreateDeck("Reset", "")
+	if err != nil {
+		t.Fatalf("CreateDeck: %v", err)
+	}
+	c1, err := st.InsertCard(deckID, Card{Question: "Q1", Answer: "A1"})
+	if err != nil {
+		t.Fatalf("InsertCard 1: %v", err)
+	}
+	c2, err := st.InsertCard(deckID, Card{Question: "Q2", Answer: "A2"})
+	if err != nil {
+		t.Fatalf("InsertCard 2: %v", err)
+	}
+	if err := st.MarkCardCovered(c1); err != nil {
+		t.Fatalf("MarkCardCovered 1: %v", err)
+	}
+	if err := st.MarkCardCovered(c2); err != nil {
+		t.Fatalf("MarkCardCovered 2: %v", err)
+	}
+
+	// Verify both covered
+	covered, _, err := st.DeckCoverage(deckID)
+	if err != nil {
+		t.Fatalf("DeckCoverage before reset: %v", err)
+	}
+	if covered != 2 {
+		t.Fatalf("covered before reset = %d, want 2", covered)
+	}
+
+	// Reset
+	if err := st.ResetDeckCoverage(deckID); err != nil {
+		t.Fatalf("ResetDeckCoverage: %v", err)
+	}
+
+	covered, total, err := st.DeckCoverage(deckID)
+	if err != nil {
+		t.Fatalf("DeckCoverage after reset: %v", err)
+	}
+	if covered != 0 || total != 2 {
+		t.Fatalf("DeckCoverage after reset = %d/%d, want 0/2", covered, total)
+	}
+
+	// Cards still exist
+	cards, err := st.ListCards(deckID, 100)
+	if err != nil {
+		t.Fatalf("ListCards after reset: %v", err)
+	}
+	if len(cards) != 2 {
+		t.Fatalf("card count after reset = %d, want 2", len(cards))
+	}
+}

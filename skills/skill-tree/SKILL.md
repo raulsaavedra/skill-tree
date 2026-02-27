@@ -124,6 +124,9 @@ This returns the full skill tree with levels, linked decks (with card counts), l
 - Delete a deck:
   - `skill-tree deck delete --deck-id 1`
   - `skill-tree deck delete --deck-name "VPC Quiz"`
+- Reset coverage for a deck:
+  - `skill-tree deck reset-coverage --deck-id 1`
+  - `skill-tree deck reset-coverage --deck-name "VPC Quiz"`
 - Link/unlink a deck to a skill:
   - `skill-tree deck link --deck-id 1 --skill-id 2`
   - `skill-tree deck unlink --deck-id 1 --skill-id 2`
