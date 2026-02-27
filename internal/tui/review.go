@@ -411,7 +411,7 @@ func (m ReviewModel) renderReview() string {
 		m.renderPagination(),
 		progress,
 		"",
-		lipgloss.NewStyle().Bold(true).Render(card.Question),
+		m.renderQuestion(card.Question),
 	}
 
 	if m.currentEffectiveMode() == ModeMCQ && m.hasChoices(&card) {
@@ -521,6 +521,15 @@ func (m ReviewModel) renderAnswer(card store.Card) []string {
 		lines = append(lines, renderMarkdown(card.Extra, lipgloss.NewStyle())...)
 	}
 	return lines
+}
+
+func (m ReviewModel) renderQuestion(question string) string {
+	style := lipgloss.NewStyle().Bold(true)
+	if m.width > 0 {
+		pad := horizontalPadding(m.width)
+		style = style.Width(m.width - 2*pad)
+	}
+	return style.Render(question)
 }
 
 func answerText(card store.Card) string {
