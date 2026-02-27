@@ -56,6 +56,7 @@ type ReviewModel struct {
 	width        int
 	done         bool
 	fromTree     bool
+	st *store.Store // nil-safe: coverage writes skipped if nil
 }
 
 // NewReviewModel creates a ReviewModel. If startInReview is true, the selected
@@ -66,6 +67,7 @@ func NewReviewModel(
 	selectedDeck int,
 	mode ReviewMode,
 	startInReview bool,
+	st *store.Store,
 ) ReviewModel {
 	if len(decks) == 0 {
 		return ReviewModel{
@@ -89,6 +91,7 @@ func NewReviewModel(
 		deckCursor:  selectedDeck,
 		mode:        mode,
 		stage:       stageDeckSelect,
+		st:          st,
 	}
 	if startInReview {
 		m.fromTree = true
@@ -180,6 +183,7 @@ func (m ReviewModel) updateDone(msg tea.KeyMsg) ReviewModel {
 		if m.fromTree {
 			m.done = true
 		} else if len(m.decks) > 0 {
+			m.refreshDeckCoverage()
 			m.stage = stageDeckSelect
 		} else {
 			m.done = true
@@ -188,6 +192,7 @@ func (m ReviewModel) updateDone(msg tea.KeyMsg) ReviewModel {
 		if m.fromTree {
 			m.done = true
 		} else if len(m.decks) > 0 {
+			m.refreshDeckCoverage()
 			m.stage = stageDeckSelect
 		}
 	}
@@ -201,6 +206,7 @@ func (m ReviewModel) updateReview(msg tea.KeyMsg) ReviewModel {
 			if m.fromTree {
 				m.done = true
 			} else if len(m.decks) > 0 {
+				m.refreshDeckCoverage()
 				m.stage = stageDeckSelect
 			}
 		case "q", "esc":
@@ -219,6 +225,7 @@ func (m ReviewModel) updateReview(msg tea.KeyMsg) ReviewModel {
 			return m
 		}
 		if len(m.decks) > 0 {
+			m.refreshDeckCoverage()
 			m.stage = stageDeckSelect
 			return m
 		}
@@ -246,7 +253,8 @@ func (m ReviewModel) updateReview(msg tea.KeyMsg) ReviewModel {
 		m.mode = ModeMCQ
 	case "a":
 		m.mode = ModeAuto
-	case "enter", " ":
+	case "x":
+		// Advance without marking coverage.
 		if m.showAnswer {
 			if m.cardCursor >= len(m.cards)-1 {
 				m.stage = stageDone
@@ -255,7 +263,33 @@ func (m ReviewModel) updateReview(msg tea.KeyMsg) ReviewModel {
 			m.nextCard()
 			return m
 		}
+	case "enter", " ":
+		if m.showAnswer {
+			// Mark card covered (flashcard implicit, MCQ already scored on reveal).
+			if m.currentEffectiveMode() == ModeFlashcard {
+				card := m.currentCard()
+				if card != nil && m.st != nil {
+					_ = m.st.MarkCardCovered(card.ID)
+				}
+			}
+			if m.cardCursor >= len(m.cards)-1 {
+				m.stage = stageDone
+				return m
+			}
+			m.nextCard()
+			return m
+		}
+		// Reveal answer.
 		m.showAnswer = true
+		// MCQ auto-score on reveal.
+		if m.currentEffectiveMode() == ModeMCQ {
+			card := m.currentCard()
+			if card != nil && card.CorrectIndex != nil && m.choiceCursor == *card.CorrectIndex {
+				if m.st != nil {
+					_ = m.st.MarkCardCovered(card.ID)
+				}
+			}
+		}
 	}
 
 	return m
@@ -271,6 +305,19 @@ func (m *ReviewModel) activateDeck(index int) {
 	m.cardCursor = 0
 	m.choiceCursor = 0
 	m.showAnswer = false
+}
+
+// refreshDeckCoverage re-reads CoveredCount from the DB for all decks.
+func (m *ReviewModel) refreshDeckCoverage() {
+	if m.st == nil {
+		return
+	}
+	for i := range m.decks {
+		covered, _, err := m.st.DeckCoverage(m.decks[i].ID)
+		if err == nil {
+			m.decks[i].CoveredCount = covered
+		}
+	}
 }
 
 func (m *ReviewModel) resetRevealState() {
@@ -372,7 +419,8 @@ func (m ReviewModel) renderDeckSelect() string {
 			prefix = "> "
 			style = style.Foreground(lipgloss.Color("13")).Bold(true)
 		}
-		lines = append(lines, style.Render(fmt.Sprintf("%s%s (%d)", prefix, d.Name, d.CardCount)))
+		cov := renderCoverage(d.CoveredCount, d.CardCount)
+		lines = append(lines, style.Render(fmt.Sprintf("%s%s (%d)", prefix, d.Name, d.CardCount))+" "+cov)
 	}
 	return renderWithHorizontalPadding(lines, m.width)
 }
@@ -424,9 +472,11 @@ func (m ReviewModel) renderReview() string {
 		lines = append(lines, m.renderAnswer(card)...)
 	}
 
-	help := "enter/space: reveal->next | n/p: next/prev | N/P: jump 10 | f/m/a: mode | q: quit"
+	var help string
 	if m.currentEffectiveMode() == ModeMCQ {
-		help = "enter/space: reveal->next | j/k: choice | n/p: next/prev | N/P: jump 10 | f/m/a: mode | q: quit"
+		help = "enter/space: reveal->next | j/k: choice | n/p: next/prev | N/P: jump 10 | x: skip | f/m/a: mode | q: quit"
+	} else {
+		help = "enter/space: reveal->next | n/p: next/prev | N/P: jump 10 | x: skip | f/m/a: mode | q: quit"
 	}
 	if len(m.decks) > 1 {
 		help += " | b: decks"
@@ -530,6 +580,22 @@ func (m ReviewModel) renderQuestion(question string) string {
 		style = style.Width(m.width - 2*pad)
 	}
 	return style.Render(question)
+}
+
+func renderCoverage(covered, total int) string {
+	if total == 0 {
+		return lipgloss.NewStyle().Faint(true).Render("--")
+	}
+	pct := covered * 100 / total
+	color := "8" // dim for 0%
+	if pct >= 100 {
+		color = "10" // green
+	} else if pct >= 50 {
+		color = "14" // cyan
+	} else if pct > 0 {
+		color = "11" // yellow
+	}
+	return lipgloss.NewStyle().Foreground(lipgloss.Color(color)).Render(fmt.Sprintf("%d%%", pct))
 }
 
 func answerText(card store.Card) string {

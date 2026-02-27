@@ -600,7 +600,8 @@ func deckCmd() *cobra.Command {
 				return output.JSON(decks)
 			}
 			for _, d := range decks {
-				fmt.Printf("%d\t%s\t%d\t%s\t%s\n", d.ID, d.Name, d.CardCount, formatUpdatedAt(d.UpdatedAt), d.Description)
+				cov := coverageText(d.CoveredCount, d.CardCount)
+				fmt.Printf("%d\t%s\t%d\t%s\t%s\t%s\n", d.ID, d.Name, d.CardCount, cov, formatUpdatedAt(d.UpdatedAt), d.Description)
 			}
 			return nil
 		},
@@ -1003,7 +1004,7 @@ func runSkillReview(cmd *cobra.Command, skillName string) error {
 	decks := []store.Deck{deck}
 	cardsByDeck := map[int64][]store.Card{-1: cards}
 
-	model := tui.NewReviewModel(decks, cardsByDeck, 0, mode, true)
+	model := tui.NewReviewModel(decks, cardsByDeck, 0, mode, true, st)
 	_, err = tea.NewProgram(model, tea.WithAltScreen()).Run()
 	return err
 }
@@ -1055,7 +1056,7 @@ func runReviewSession(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	model := tui.NewReviewModel(decks, cardsByDeck, selectedIndex, mode, startInReview)
+	model := tui.NewReviewModel(decks, cardsByDeck, selectedIndex, mode, startInReview, st)
 	_, err = tea.NewProgram(model, tea.WithAltScreen()).Run()
 	return err
 }
@@ -1098,7 +1099,7 @@ func runTree() error {
 		cardsByDeck[deck.ID] = cards
 	}
 
-	model := tui.NewAppModel(ctx.Skills, allDecks, cardsByDeck)
+	model := tui.NewAppModel(ctx.Skills, allDecks, cardsByDeck, st)
 	_, err = tea.NewProgram(model, tea.WithAltScreen()).Run()
 	return err
 }
@@ -1300,6 +1301,13 @@ func parseModeWithFallback(raw string) tui.ReviewMode {
 	return mode
 }
 
+func coverageText(covered, total int) string {
+	if total == 0 {
+		return "--"
+	}
+	return fmt.Sprintf("%d%%", covered*100/total)
+}
+
 func formatUpdatedAt(raw string) string {
 	value := strings.TrimSpace(raw)
 	if value == "" {
@@ -1328,7 +1336,7 @@ func printSkillLinks(decks []store.Deck, scenarios []store.Scenario, indent stri
 	if len(decks) > 0 {
 		fmt.Printf("%sDecks:\n", indent)
 		for _, d := range decks {
-			fmt.Printf("%s  %s (%d cards)\n", indent, d.Name, d.CardCount)
+			fmt.Printf("%s  %s (%d cards, %s)\n", indent, d.Name, d.CardCount, coverageText(d.CoveredCount, d.CardCount))
 		}
 	}
 	if len(scenarios) > 0 {

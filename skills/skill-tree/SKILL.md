@@ -184,11 +184,23 @@ The `answer` and `extra` fields support markdown formatting in the TUI:
 - `--mode auto`: use MCQ when choices exist, otherwise flashcard.
 
 ### Keyboard controls (TUI)
-- `enter`/`space`: reveal answer, then advance to next card
+- `enter`/`space`: reveal answer, then advance (marks card as covered)
+  - MCQ: auto-scores on reveal (correct choice = card covered)
+  - Flashcard: implicitly marks card as covered when advancing
+- `x`: advance without marking card as covered (skip)
 - `n`/`p`: next/previous card
 - `f`/`m`/`a`: switch to flashcard/mcq/auto mode
 - `j`/`k` or `up`/`down`: navigate MCQ choices
 - `q` or `ctrl+c`: quit
+
+### Coverage scoring
+- Coverage = `covered cards / total deck cards` — tracks deliberate practice over time.
+- A card becomes "covered" when the learner advances past it (MCQ: correct choice on reveal, flashcard: press `enter`/`space` after reveal).
+- Press `x` after reveal to advance without marking coverage (for cards you didn't actually get right).
+- Coverage only goes up, never down. Once a card is covered, it stays covered permanently.
+- Works for both regular deck review and test mode (test mode attributes each card back to its source deck).
+- Coverage percentages appear in the deck selector, skill detail view, `deck list`, and `skill show`.
+- Adding new cards to a deck lowers coverage (new material = new work to do).
 
 ## Tree TUI
 ```

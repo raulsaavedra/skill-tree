@@ -1156,3 +1156,154 @@ func TestImportFromQuiz(t *testing.T) {
 		t.Fatalf("ListDecks after second import count = %d, want 2", len(decks))
 	}
 }
+
+// --- 16. TestCardCoverage ---
+
+func TestCardCoverage(t *testing.T) {
+	t.Parallel()
+
+	st := openTempStore(t)
+
+	deckID, err := st.CreateDeck("AWS", "")
+	if err != nil {
+		t.Fatalf("CreateDeck: %v", err)
+	}
+	cardID1, err := st.InsertCard(deckID, Card{Question: "Q1", Answer: "A1"})
+	if err != nil {
+		t.Fatalf("InsertCard 1: %v", err)
+	}
+	cardID2, err := st.InsertCard(deckID, Card{Question: "Q2", Answer: "A2"})
+	if err != nil {
+		t.Fatalf("InsertCard 2: %v", err)
+	}
+
+	// Initially 0 covered
+	covered, total, err := st.DeckCoverage(deckID)
+	if err != nil {
+		t.Fatalf("DeckCoverage initial: %v", err)
+	}
+	if covered != 0 || total != 2 {
+		t.Fatalf("DeckCoverage initial = %d/%d, want 0/2", covered, total)
+	}
+
+	// Mark one card
+	if err := st.MarkCardCovered(cardID1); err != nil {
+		t.Fatalf("MarkCardCovered 1: %v", err)
+	}
+	covered, total, err = st.DeckCoverage(deckID)
+	if err != nil {
+		t.Fatalf("DeckCoverage after 1: %v", err)
+	}
+	if covered != 1 || total != 2 {
+		t.Fatalf("DeckCoverage after 1 = %d/%d, want 1/2", covered, total)
+	}
+
+	// Idempotent
+	if err := st.MarkCardCovered(cardID1); err != nil {
+		t.Fatalf("MarkCardCovered idempotent: %v", err)
+	}
+	covered, _, err = st.DeckCoverage(deckID)
+	if err != nil {
+		t.Fatalf("DeckCoverage idempotent: %v", err)
+	}
+	if covered != 1 {
+		t.Fatalf("DeckCoverage idempotent = %d, want 1", covered)
+	}
+
+	// Mark second card
+	if err := st.MarkCardCovered(cardID2); err != nil {
+		t.Fatalf("MarkCardCovered 2: %v", err)
+	}
+	covered, total, err = st.DeckCoverage(deckID)
+	if err != nil {
+		t.Fatalf("DeckCoverage after 2: %v", err)
+	}
+	if covered != 2 || total != 2 {
+		t.Fatalf("DeckCoverage after 2 = %d/%d, want 2/2", covered, total)
+	}
+
+	// CoveredCount in ListDecks
+	decks, err := st.ListDecks()
+	if err != nil {
+		t.Fatalf("ListDecks: %v", err)
+	}
+	if decks[0].CoveredCount != 2 {
+		t.Fatalf("ListDecks CoveredCount = %d, want 2", decks[0].CoveredCount)
+	}
+
+	// CoveredCount in GetDeckByName
+	deck, err := st.GetDeckByName("AWS")
+	if err != nil {
+		t.Fatalf("GetDeckByName: %v", err)
+	}
+	if deck.CoveredCount != 2 {
+		t.Fatalf("GetDeckByName CoveredCount = %d, want 2", deck.CoveredCount)
+	}
+}
+
+// --- 17. TestCardCoverageCascadeDelete ---
+
+func TestCardCoverageCascadeDelete(t *testing.T) {
+	t.Parallel()
+
+	st := openTempStore(t)
+
+	deckID, err := st.CreateDeck("Test", "")
+	if err != nil {
+		t.Fatalf("CreateDeck: %v", err)
+	}
+	cardID, err := st.InsertCard(deckID, Card{Question: "Q", Answer: "A"})
+	if err != nil {
+		t.Fatalf("InsertCard: %v", err)
+	}
+	if err := st.MarkCardCovered(cardID); err != nil {
+		t.Fatalf("MarkCardCovered: %v", err)
+	}
+
+	// Delete card — coverage row should cascade
+	if err := st.DeleteCard(deckID, cardID); err != nil {
+		t.Fatalf("DeleteCard: %v", err)
+	}
+	covered, total, err := st.DeckCoverage(deckID)
+	if err != nil {
+		t.Fatalf("DeckCoverage after card delete: %v", err)
+	}
+	if covered != 0 || total != 0 {
+		t.Fatalf("DeckCoverage after card delete = %d/%d, want 0/0", covered, total)
+	}
+}
+
+// --- 18. TestCardCoverageDeckDelete ---
+
+func TestCardCoverageDeckDelete(t *testing.T) {
+	t.Parallel()
+
+	st := openTempStore(t)
+
+	deckID, err := st.CreateDeck("Test", "")
+	if err != nil {
+		t.Fatalf("CreateDeck: %v", err)
+	}
+	cardID, err := st.InsertCard(deckID, Card{Question: "Q", Answer: "A"})
+	if err != nil {
+		t.Fatalf("InsertCard: %v", err)
+	}
+	if err := st.MarkCardCovered(cardID); err != nil {
+		t.Fatalf("MarkCardCovered: %v", err)
+	}
+
+	// Delete deck — cards and coverage should cascade
+	if err := st.DeleteDeckByID(deckID); err != nil {
+		t.Fatalf("DeleteDeckByID: %v", err)
+	}
+
+	// Verify coverage row is gone by checking no rows in card_coverage
+	var count int
+	err = st.DB.QueryRow(`SELECT COUNT(*) FROM card_coverage`).Scan(&count)
+	if err != nil {
+		t.Fatalf("count card_coverage: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("card_coverage count after deck delete = %d, want 0", count)
+	}
+}

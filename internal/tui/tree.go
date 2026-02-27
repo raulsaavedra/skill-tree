@@ -702,7 +702,8 @@ func (m TreeModel) renderDetail() string {
 					style = style.Foreground(lipgloss.Color("13")).Bold(true)
 				}
 				cardInfo := lipgloss.NewStyle().Faint(true).Render(fmt.Sprintf("%d cards", d.CardCount))
-				lines = append(lines, style.Render(prefix+d.Name)+"  "+cardInfo)
+				cov := renderCoverage(d.CoveredCount, d.CardCount)
+				lines = append(lines, style.Render(prefix+d.Name)+"  "+cardInfo+" "+cov)
 			}
 		}
 		if len(m.detailScenarios) > 0 {
@@ -741,7 +742,8 @@ func (m TreeModel) renderDetail() string {
 						style = style.Foreground(lipgloss.Color("13")).Bold(true)
 					}
 					cardInfo := lipgloss.NewStyle().Faint(true).Render(fmt.Sprintf("%d cards", d.CardCount))
-					lines = append(lines, style.Render(prefix+d.Name)+"  "+cardInfo)
+					cov := renderCoverage(d.CoveredCount, d.CardCount)
+					lines = append(lines, style.Render(prefix+d.Name)+"  "+cardInfo+" "+cov)
 				}
 			}
 
@@ -781,13 +783,15 @@ type AppModel struct {
 	review ReviewModel
 	active appStage
 	width  int
+	st     *store.Store
 }
 
 // NewAppModel creates the top-level app model.
-func NewAppModel(skills []store.Skill, allDecks []store.Deck, cardsByDeck map[int64][]store.Card) AppModel {
+func NewAppModel(skills []store.Skill, allDecks []store.Deck, cardsByDeck map[int64][]store.Card, st *store.Store) AppModel {
 	return AppModel{
 		tree:   NewTreeModel(skills, allDecks, cardsByDeck),
 		active: appTree,
+		st:     st,
 	}
 }
 
@@ -838,7 +842,7 @@ func (m AppModel) updateTree(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				deck := store.Deck{ID: -1, Name: skill.Name + " (test)", CardCount: len(cards)}
 				decks := []store.Deck{deck}
 				cardsByDeck := map[int64][]store.Card{-1: cards}
-				m.review = NewReviewModel(decks, cardsByDeck, 0, ModeAuto, true)
+				m.review = NewReviewModel(decks, cardsByDeck, 0, ModeAuto, true, m.st)
 				m.review.width = m.width
 				m.active = appReview
 				return m, nil
@@ -853,7 +857,7 @@ func (m AppModel) updateTree(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		for _, d := range decks {
 			cardsByDeck[d.ID] = m.tree.cardsByDeck[d.ID]
 		}
-		m.review = NewReviewModel(decks, cardsByDeck, m.tree.detailCursor, ModeAuto, true)
+		m.review = NewReviewModel(decks, cardsByDeck, m.tree.detailCursor, ModeAuto, true, m.st)
 		m.review.width = m.width
 		m.active = appReview
 		return m, nil
@@ -869,9 +873,48 @@ func (m AppModel) updateReview(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m.review = updated.(ReviewModel)
 	if m.review.Done() {
 		m.active = appTree
-		// Stay in skill detail so the user returns to context.
+		m.refreshTreeCoverage()
 	}
 	return m, cmd
+}
+
+// refreshTreeCoverage re-reads CoveredCount from the DB for all decks
+// visible in the tree (detailDecks, allDecks, and skill-embedded decks).
+func (m *AppModel) refreshTreeCoverage() {
+	if m.st == nil {
+		return
+	}
+	// Refresh detailDecks (what the detail view renders).
+	for i := range m.tree.detailDecks {
+		covered, _, err := m.st.DeckCoverage(m.tree.detailDecks[i].ID)
+		if err == nil {
+			m.tree.detailDecks[i].CoveredCount = covered
+		}
+	}
+	// Refresh allDecks (used by collectSkillCards and future detail loads).
+	for i := range m.tree.allDecks {
+		covered, _, err := m.st.DeckCoverage(m.tree.allDecks[i].ID)
+		if err == nil {
+			m.tree.allDecks[i].CoveredCount = covered
+		}
+	}
+	// Refresh decks embedded in skills (used by loadDetailData).
+	m.refreshSkillDecks(m.tree.skills)
+}
+
+func (m *AppModel) refreshSkillDecks(skills []store.Skill) {
+	if m.st == nil {
+		return
+	}
+	for i := range skills {
+		for j := range skills[i].Decks {
+			covered, _, err := m.st.DeckCoverage(skills[i].Decks[j].ID)
+			if err == nil {
+				skills[i].Decks[j].CoveredCount = covered
+			}
+		}
+		m.refreshSkillDecks(skills[i].Children)
+	}
 }
 
 // View delegates to the active sub-model.

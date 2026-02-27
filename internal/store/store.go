@@ -64,11 +64,12 @@ type Context struct {
 }
 
 type Deck struct {
-	ID          int64  `json:"id"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	CardCount   int    `json:"card_count"`
-	UpdatedAt   string `json:"updated_at"`
+	ID           int64  `json:"id"`
+	Name         string `json:"name"`
+	Description  string `json:"description"`
+	CardCount    int    `json:"card_count"`
+	CoveredCount int    `json:"covered_count"`
+	UpdatedAt    string `json:"updated_at"`
 }
 
 type Card struct {
@@ -190,6 +191,10 @@ func migrate(db *sql.DB) error {
 			deck_id  INTEGER NOT NULL REFERENCES decks(id) ON DELETE CASCADE,
 			skill_id INTEGER NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
 			PRIMARY KEY (deck_id, skill_id)
+		)`,
+		`CREATE TABLE IF NOT EXISTS card_coverage (
+			card_id    INTEGER PRIMARY KEY REFERENCES cards(id) ON DELETE CASCADE,
+			covered_at DATETIME DEFAULT CURRENT_TIMESTAMP
 		)`,
 		// Triggers
 		`CREATE TRIGGER IF NOT EXISTS cards_updated_at AFTER UPDATE ON cards
@@ -328,10 +333,11 @@ func (s *Store) getChildSkills(parentID int64) ([]Skill, error) {
 func (s *Store) loadSkillLinks(sk *Skill) error {
 	// Linked decks
 	drows, err := s.DB.Query(`
-		SELECT d.id, d.name, COALESCE(d.description,''), COUNT(c.id), d.updated_at
+		SELECT d.id, d.name, COALESCE(d.description,''), COUNT(c.id), COUNT(cc.card_id), d.updated_at
 		FROM deck_skills ds
 		JOIN decks d ON d.id = ds.deck_id
 		LEFT JOIN cards c ON c.deck_id = d.id
+		LEFT JOIN card_coverage cc ON cc.card_id = c.id
 		WHERE ds.skill_id = ?
 		GROUP BY d.id
 		ORDER BY d.name
@@ -343,7 +349,7 @@ func (s *Store) loadSkillLinks(sk *Skill) error {
 	sk.Decks = []Deck{}
 	for drows.Next() {
 		var d Deck
-		if err := drows.Scan(&d.ID, &d.Name, &d.Description, &d.CardCount, &d.UpdatedAt); err != nil {
+		if err := drows.Scan(&d.ID, &d.Name, &d.Description, &d.CardCount, &d.CoveredCount, &d.UpdatedAt); err != nil {
 			return fmt.Errorf("get skill decks scan: %w", err)
 		}
 		sk.Decks = append(sk.Decks, d)
@@ -499,10 +505,11 @@ func (s *Store) FullContext() (*Context, error) {
 	// Load deck links: skill_id -> []Deck
 	deckLinks := map[int64][]Deck{}
 	drows, err := s.DB.Query(`
-		SELECT ds.skill_id, d.id, d.name, COALESCE(d.description,''), COUNT(c.id), d.updated_at
+		SELECT ds.skill_id, d.id, d.name, COALESCE(d.description,''), COUNT(c.id), COUNT(cc.card_id), d.updated_at
 		FROM deck_skills ds
 		JOIN decks d ON d.id = ds.deck_id
 		LEFT JOIN cards c ON c.deck_id = d.id
+		LEFT JOIN card_coverage cc ON cc.card_id = c.id
 		GROUP BY ds.skill_id, d.id
 		ORDER BY d.name
 	`)
@@ -513,7 +520,7 @@ func (s *Store) FullContext() (*Context, error) {
 	for drows.Next() {
 		var skillID int64
 		var d Deck
-		if err := drows.Scan(&skillID, &d.ID, &d.Name, &d.Description, &d.CardCount, &d.UpdatedAt); err != nil {
+		if err := drows.Scan(&skillID, &d.ID, &d.Name, &d.Description, &d.CardCount, &d.CoveredCount, &d.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("full context decks scan: %w", err)
 		}
 		deckLinks[skillID] = append(deckLinks[skillID], d)
@@ -604,9 +611,11 @@ func (s *Store) CreateDeck(name, description string) (int64, error) {
 
 func (s *Store) ListDecks() ([]Deck, error) {
 	rows, err := s.DB.Query(`
-		SELECT d.id, d.name, COALESCE(d.description,''), COUNT(c.id) AS card_count, d.updated_at
+		SELECT d.id, d.name, COALESCE(d.description,''),
+		       COUNT(c.id) AS card_count, COUNT(cc.card_id) AS covered_count, d.updated_at
 		FROM decks d
 		LEFT JOIN cards c ON c.deck_id = d.id
+		LEFT JOIN card_coverage cc ON cc.card_id = c.id
 		GROUP BY d.id
 		ORDER BY d.name ASC
 	`)
@@ -617,7 +626,7 @@ func (s *Store) ListDecks() ([]Deck, error) {
 	out := []Deck{}
 	for rows.Next() {
 		var d Deck
-		if err := rows.Scan(&d.ID, &d.Name, &d.Description, &d.CardCount, &d.UpdatedAt); err != nil {
+		if err := rows.Scan(&d.ID, &d.Name, &d.Description, &d.CardCount, &d.CoveredCount, &d.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("list decks scan: %w", err)
 		}
 		out = append(out, d)
@@ -628,12 +637,14 @@ func (s *Store) ListDecks() ([]Deck, error) {
 func (s *Store) GetDeckByName(name string) (*Deck, error) {
 	var d Deck
 	err := s.DB.QueryRow(`
-		SELECT d.id, d.name, COALESCE(d.description,''), COUNT(c.id) AS card_count, d.updated_at
+		SELECT d.id, d.name, COALESCE(d.description,''),
+		       COUNT(c.id) AS card_count, COUNT(cc.card_id) AS covered_count, d.updated_at
 		FROM decks d
 		LEFT JOIN cards c ON c.deck_id = d.id
+		LEFT JOIN card_coverage cc ON cc.card_id = c.id
 		WHERE d.name = ?
 		GROUP BY d.id
-	`, name).Scan(&d.ID, &d.Name, &d.Description, &d.CardCount, &d.UpdatedAt)
+	`, name).Scan(&d.ID, &d.Name, &d.Description, &d.CardCount, &d.CoveredCount, &d.UpdatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("get deck by name %q: %w", name, err)
 	}
@@ -653,6 +664,33 @@ func (s *Store) DeleteDeckByID(id int64) error {
 		return fmt.Errorf("deck %d not found", id)
 	}
 	return nil
+}
+
+// --- Coverage ---
+
+// MarkCardCovered records that a card has been correctly answered.
+// Idempotent: does nothing if the card is already covered.
+func (s *Store) MarkCardCovered(cardID int64) error {
+	_, err := s.DB.Exec(`INSERT OR IGNORE INTO card_coverage(card_id) VALUES(?)`, cardID)
+	if err != nil {
+		return fmt.Errorf("mark card covered: %w", err)
+	}
+	return nil
+}
+
+// DeckCoverage returns (coveredCount, totalCount) for a deck.
+func (s *Store) DeckCoverage(deckID int64) (int, int, error) {
+	var total, covered int
+	err := s.DB.QueryRow(`
+		SELECT COUNT(c.id), COUNT(cc.card_id)
+		FROM cards c
+		LEFT JOIN card_coverage cc ON cc.card_id = c.id
+		WHERE c.deck_id = ?
+	`, deckID).Scan(&total, &covered)
+	if err != nil {
+		return 0, 0, fmt.Errorf("deck coverage %d: %w", deckID, err)
+	}
+	return covered, total, nil
 }
 
 // --- Card CRUD ---
