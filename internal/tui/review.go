@@ -56,7 +56,8 @@ type ReviewModel struct {
 	width        int
 	done         bool
 	fromTree     bool
-	st *store.Store // nil-safe: coverage writes skipped if nil
+	st         *store.Store    // nil-safe: coverage writes skipped if nil
+	coveredIDs map[int64]bool // card IDs already covered
 }
 
 // NewReviewModel creates a ReviewModel. If startInReview is true, the selected
@@ -259,6 +260,7 @@ func (m ReviewModel) updateReview(msg tea.KeyMsg) ReviewModel {
 			card := m.currentCard()
 			if card != nil && m.st != nil {
 				_ = m.st.MarkCardCovered(card.ID)
+				m.coveredIDs[card.ID] = true
 			}
 			if m.cardCursor >= len(m.cards)-1 {
 				m.stage = stageDone
@@ -275,6 +277,7 @@ func (m ReviewModel) updateReview(msg tea.KeyMsg) ReviewModel {
 			if card != nil && card.CorrectIndex != nil && m.choiceCursor == *card.CorrectIndex {
 				if m.st != nil {
 					_ = m.st.MarkCardCovered(card.ID)
+					m.coveredIDs[card.ID] = true
 				}
 			}
 		}
@@ -293,6 +296,23 @@ func (m *ReviewModel) activateDeck(index int) {
 	m.cardCursor = 0
 	m.choiceCursor = 0
 	m.showAnswer = false
+	m.loadCoveredIDs()
+}
+
+// loadCoveredIDs loads the set of covered card IDs for the current card list.
+func (m *ReviewModel) loadCoveredIDs() {
+	m.coveredIDs = map[int64]bool{}
+	if m.st == nil || len(m.cards) == 0 {
+		return
+	}
+	ids := make([]int64, len(m.cards))
+	for i, c := range m.cards {
+		ids[i] = c.ID
+	}
+	covered, err := m.st.CoveredCardIDs(ids)
+	if err == nil {
+		m.coveredIDs = covered
+	}
 }
 
 // refreshDeckCoverage re-reads CoveredCount from the DB for all decks.
@@ -440,7 +460,11 @@ func (m ReviewModel) renderReview() string {
 	if m.deckCursor >= 0 && m.deckCursor < len(m.decks) {
 		deckName = m.decks[m.deckCursor].Name
 	}
-	progress := fmt.Sprintf("[%d/%d] [%s] %s", m.cardCursor+1, len(m.cards), m.modeLabel(), deckName)
+	counter := fmt.Sprintf("[%d/%d]", m.cardCursor+1, len(m.cards))
+	if m.coveredIDs[card.ID] {
+		counter = lipgloss.NewStyle().Foreground(lipgloss.Color("10")).Render(counter)
+	}
+	progress := fmt.Sprintf("%s [%s] %s", counter, m.modeLabel(), deckName)
 
 	lines := []string{
 		title,
@@ -496,6 +520,16 @@ func (m ReviewModel) renderMCQ(card store.Card) []string {
 	return out
 }
 
+func (m ReviewModel) dotStyle(cardIndex int) lipgloss.Style {
+	if cardIndex == m.cardCursor {
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Bold(true)
+	}
+	if cardIndex >= 0 && cardIndex < len(m.cards) && m.coveredIDs[m.cards[cardIndex].ID] {
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
+	}
+	return lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+}
+
 func (m ReviewModel) renderPagination() string {
 	total := len(m.cards)
 	if total == 0 {
@@ -506,11 +540,7 @@ func (m ReviewModel) renderPagination() string {
 	if total <= maxDots {
 		dots := make([]string, 0, total)
 		for i := range m.cards {
-			style := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
-			if i == m.cardCursor {
-				style = lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Bold(true)
-			}
-			dots = append(dots, style.Render("•"))
+			dots = append(dots, m.dotStyle(i).Render("•"))
 		}
 		return strings.Join(dots, "")
 	}
@@ -537,11 +567,7 @@ func (m ReviewModel) renderPagination() string {
 		parts = append(parts, dim.Render("…"))
 	}
 	for i := start; i < end; i++ {
-		style := dim
-		if i == m.cardCursor {
-			style = lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Bold(true)
-		}
-		parts = append(parts, style.Render("•"))
+		parts = append(parts, m.dotStyle(i).Render("•"))
 	}
 	if end < total {
 		parts = append(parts, dim.Render("…"))

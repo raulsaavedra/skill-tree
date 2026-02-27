@@ -693,6 +693,34 @@ func (s *Store) DeckCoverage(deckID int64) (int, int, error) {
 	return covered, total, nil
 }
 
+// CoveredCardIDs returns the set of card IDs that are covered from the given list.
+func (s *Store) CoveredCardIDs(cardIDs []int64) (map[int64]bool, error) {
+	if len(cardIDs) == 0 {
+		return map[int64]bool{}, nil
+	}
+	placeholders := make([]string, len(cardIDs))
+	args := make([]any, len(cardIDs))
+	for i, id := range cardIDs {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+	query := `SELECT card_id FROM card_coverage WHERE card_id IN (` + strings.Join(placeholders, ",") + `)`
+	rows, err := s.DB.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("covered card ids: %w", err)
+	}
+	defer rows.Close()
+	out := map[int64]bool{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("covered card ids scan: %w", err)
+		}
+		out[id] = true
+	}
+	return out, rows.Err()
+}
+
 // ResetDeckCoverage deletes all coverage records for cards in a deck.
 func (s *Store) ResetDeckCoverage(deckID int64) error {
 	_, err := s.DB.Exec(`
