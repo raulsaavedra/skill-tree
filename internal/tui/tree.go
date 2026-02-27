@@ -105,6 +105,15 @@ type TreeModel struct {
 	detailDecks     []store.Deck
 	detailSections  []detailSection // groups decks/scenarios by skill
 	detailScenarios []store.Scenario
+
+	// Search state.
+	searching       bool
+	searchQuery     string
+	searchMatches   []int          // indices into flatNodes that match
+	searchIdx       int            // current match for n/N cycling
+	matchSet        map[int64]bool // skill IDs that match (for highlight)
+	savedExpanded   map[int64]bool // snapshot of expanded before search
+	searchConfirmed bool           // true after enter confirms search
 }
 
 // NewTreeModel creates a TreeModel from the full skill tree.
@@ -170,12 +179,174 @@ func (m TreeModel) View() string {
 	}
 }
 
+// --- Search ---
+
+func deepCopyMap(src map[int64]bool) map[int64]bool {
+	dst := make(map[int64]bool, len(src))
+	for k, v := range src {
+		dst[k] = v
+	}
+	return dst
+}
+
+func (m *TreeModel) applySearch() {
+	query := strings.ToLower(m.searchQuery)
+
+	// Restore from saved state so backspace works correctly.
+	m.expanded = deepCopyMap(m.savedExpanded)
+	m.matchSet = make(map[int64]bool)
+	m.searchMatches = m.searchMatches[:0]
+
+	if query == "" {
+		m.rebuildFlatNodes()
+		return
+	}
+
+	// Walk full tree to find matches and auto-expand ancestors.
+	m.walkForSearch(m.skills, query, nil)
+	m.rebuildFlatNodes()
+
+	// Build searchMatches from flatNodes.
+	for i, node := range m.flatNodes {
+		if m.matchSet[node.skill.ID] {
+			m.searchMatches = append(m.searchMatches, i)
+		}
+	}
+
+	// Jump cursor to first match.
+	if len(m.searchMatches) > 0 {
+		m.searchIdx = 0
+		m.cursor = m.searchMatches[0]
+	}
+}
+
+func (m *TreeModel) walkForSearch(skills []store.Skill, query string, ancestors []int64) {
+	for i := range skills {
+		skill := &skills[i]
+		path := make([]int64, len(ancestors), len(ancestors)+1)
+		copy(path, ancestors)
+		path = append(path, skill.ID)
+
+		if strings.Contains(strings.ToLower(skill.Name), query) {
+			m.matchSet[skill.ID] = true
+			for _, aid := range ancestors {
+				m.expanded[aid] = true
+			}
+		}
+
+		if len(skill.Children) > 0 {
+			m.walkForSearch(skill.Children, query, path)
+		}
+	}
+}
+
+func (m *TreeModel) refreshSearchMatches() {
+	if !m.searchConfirmed || m.matchSet == nil {
+		return
+	}
+	m.searchMatches = m.searchMatches[:0]
+	for i, node := range m.flatNodes {
+		if m.matchSet[node.skill.ID] {
+			m.searchMatches = append(m.searchMatches, i)
+		}
+	}
+	if m.searchIdx >= len(m.searchMatches) {
+		m.searchIdx = 0
+	}
+}
+
+func (m TreeModel) updateSearch(msg tea.KeyMsg) (TreeModel, tea.Cmd) {
+	key := msg.String()
+
+	switch key {
+	case "ctrl+c":
+		return m, tea.Quit
+	case "esc":
+		m.expanded = m.savedExpanded
+		m.searching = false
+		m.searchConfirmed = false
+		m.searchQuery = ""
+		m.matchSet = nil
+		m.searchMatches = nil
+		m.rebuildFlatNodes()
+		if m.cursor >= len(m.flatNodes) {
+			m.cursor = len(m.flatNodes) - 1
+		}
+		if m.cursor < 0 {
+			m.cursor = 0
+		}
+		return m, nil
+	case "enter":
+		if len(m.searchMatches) > 0 {
+			m.searching = false
+			m.searchConfirmed = true
+			m.savedExpanded = nil
+		} else {
+			// No matches: cancel.
+			m.expanded = m.savedExpanded
+			m.searching = false
+			m.searchQuery = ""
+			m.matchSet = nil
+			m.searchMatches = nil
+			m.rebuildFlatNodes()
+			if m.cursor >= len(m.flatNodes) {
+				m.cursor = len(m.flatNodes) - 1
+			}
+		}
+		return m, nil
+	case "backspace":
+		if len(m.searchQuery) > 0 {
+			runes := []rune(m.searchQuery)
+			m.searchQuery = string(runes[:len(runes)-1])
+			m.applySearch()
+		}
+		return m, nil
+	default:
+		if len([]rune(key)) == 1 {
+			m.searchQuery += key
+			m.applySearch()
+		}
+		return m, nil
+	}
+}
+
 // --- Tree navigation ---
 
 func (m TreeModel) updateTree(msg tea.KeyMsg) (TreeModel, tea.Cmd) {
+	if m.searching {
+		return m.updateSearch(msg)
+	}
+
 	switch msg.String() {
 	case "q", "ctrl+c":
 		return m, tea.Quit
+	case "/":
+		m.searching = true
+		m.searchQuery = ""
+		m.searchConfirmed = false
+		m.savedExpanded = deepCopyMap(m.expanded)
+		m.matchSet = make(map[int64]bool)
+		m.searchMatches = nil
+		return m, nil
+	case "esc":
+		if m.searchConfirmed {
+			m.searchConfirmed = false
+			m.matchSet = nil
+			m.searchMatches = nil
+			m.searchIdx = 0
+		}
+	case "n":
+		if m.searchConfirmed && len(m.searchMatches) > 0 {
+			m.searchIdx = (m.searchIdx + 1) % len(m.searchMatches)
+			m.cursor = m.searchMatches[m.searchIdx]
+			return m, nil
+		}
+	case "N":
+		if m.searchConfirmed && len(m.searchMatches) > 0 {
+			m.searchIdx = (m.searchIdx - 1 + len(m.searchMatches)) % len(m.searchMatches)
+			m.cursor = m.searchMatches[m.searchIdx]
+			return m, nil
+		}
 	case "up", "k":
 		if m.cursor > 0 {
 			m.cursor--
@@ -193,6 +364,7 @@ func (m TreeModel) updateTree(msg tea.KeyMsg) (TreeModel, tea.Cmd) {
 				if m.cursor >= len(m.flatNodes) {
 					m.cursor = len(m.flatNodes) - 1
 				}
+				m.refreshSearchMatches()
 			} else {
 				// Leaf node: open detail.
 				skill := node.skill
@@ -332,7 +504,31 @@ func (m TreeModel) renderTree() string {
 	}
 
 	lines = append(lines, "")
-	lines = append(lines, lipgloss.NewStyle().Faint(true).Render("j/k Navigate  enter Expand/Collapse  d Detail  t Test  ? Levels  q Quit"))
+
+	if m.searching {
+		prompt := lipgloss.NewStyle().Bold(true).Render("/")
+		cursor := lipgloss.NewStyle().Faint(true).Render("_")
+		matchInfo := ""
+		if m.searchQuery != "" {
+			if len(m.searchMatches) == 0 {
+				matchInfo = lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Render("  no matches")
+			} else {
+				matchInfo = lipgloss.NewStyle().Faint(true).Render(
+					fmt.Sprintf("  %d/%d", m.searchIdx+1, len(m.searchMatches)),
+				)
+			}
+		}
+		lines = append(lines, prompt+m.searchQuery+cursor+matchInfo)
+	} else if m.searchConfirmed {
+		lines = append(lines, lipgloss.NewStyle().Faint(true).Render(
+			"j/k Navigate  n/N Next/Prev match  / Search  enter Expand  d Detail  t Test  esc Clear  q Quit",
+		))
+	} else {
+		lines = append(lines, lipgloss.NewStyle().Faint(true).Render(
+			"j/k Navigate  enter Expand/Collapse  d Detail  t Test  / Search  ? Levels  q Quit",
+		))
+	}
+
 	return renderWithHorizontalPadding(lines, m.width)
 }
 
@@ -365,8 +561,14 @@ func (m TreeModel) renderTreeNode(index int, node flatNode) string {
 
 	// Build the line.
 	nameStyle := lipgloss.NewStyle()
+	isMatch := m.matchSet[node.skill.ID]
 	if index == m.cursor {
 		nameStyle = nameStyle.Foreground(lipgloss.Color("13")).Bold(true)
+		if isMatch {
+			nameStyle = nameStyle.Underline(true)
+		}
+	} else if isMatch {
+		nameStyle = nameStyle.Foreground(lipgloss.Color("11")).Bold(true)
 	}
 	name := nameStyle.Render(node.skill.Name)
 
@@ -612,6 +814,13 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m AppModel) updateTree(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Don't intercept keys when tree is in search mode.
+	if m.tree.searching {
+		var cmd tea.Cmd
+		m.tree, cmd = m.tree.Update(msg)
+		return m, cmd
+	}
+
 	key := msg.String()
 
 	// 't' launches test mode: shuffled cards from skill + children.
