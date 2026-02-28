@@ -13,6 +13,7 @@ This repo now also includes an in-progress web port:
 - **Quiz decks** — flashcard and multiple-choice review with markdown-rendered answers, mode switching, and pagination
 - **Scenarios** — track hands-on projects linked to skills with status progression (planned → in_progress → completed)
 - **Linking** — decks and scenarios link to skills, so each skill shows its associated learning material
+- **Web review UI** — interactive review mode in Next.js (`/review`) with flashcard/MCQ/auto parity semantics
 
 ## Quick start
 
