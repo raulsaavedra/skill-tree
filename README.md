@@ -2,6 +2,11 @@
 
 A unified learning CLI that tracks skills, quiz decks, and hands-on scenarios in one tool.
 
+This repo now also includes an in-progress web port:
+
+- `cmd/skill-tree-api` — Go HTTP API backed by the same SQLite store/domain logic.
+- `apps/web` — Next.js + shadcn frontend (with a Next backend layer) that consumes the Go API.
+
 ## What it does
 
 - **Skill tree** — hierarchical skills with proficiency levels (0-5), navigate and review from an interactive TUI
@@ -16,9 +21,27 @@ A unified learning CLI that tracks skills, quiz decks, and hands-on scenarios in
 skill-tree
 ```
 
+## Web + API (in progress)
+
+Run Go API:
+
+```bash
+GOWORK=off go run ./cmd/skill-tree-api -addr :8080
+```
+
+Run Next.js app:
+
+```bash
+cd apps/web
+cp .env.example .env.local
+npm run dev
+```
+
 ## Stack
 
 - Go, Cobra (CLI), BubbleTea (TUI), Lipgloss (styling)
+- Go `net/http` API server (`cmd/skill-tree-api`)
+- Next.js (App Router) + shadcn UI (`apps/web`)
 - SQLite via modernc.org/sqlite (pure Go, no CGO)
 - [cli-core](../packages/cli-core) for shared utilities (DB, output, skill install)
 
