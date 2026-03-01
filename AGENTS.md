@@ -3,11 +3,12 @@
 ## Layout
 
 - `cmd/skill-tree/main.go` — CLI entry point, all Cobra commands
+- `cmd/skill-tree-api/main.go` — Go HTTP API entry point
 - `internal/store/store.go` — SQLite schema, migrations, all CRUD operations
 - `internal/store/store_test.go` — Store tests (run with `go test ./...`)
-- `internal/tui/tree.go` — Skill tree TUI (navigation, detail view, level help)
-- `internal/tui/review.go` — Card review TUI (flashcard/MCQ/auto modes)
-- `internal/tui/markdown.go` — Shared rendering utilities (markdown, padding)
+- `internal/httpapi/handler.go` — REST API handlers used by the web app
+- `apps/web/src/app/page.tsx` — web dashboard and skill tree
+- `apps/web/src/components/skill-tree/skill-tree-explorer.tsx` — interactive skill tree UI
 - `skills/skill-tree/SKILL.md` — Claude skill definition (installed to ~/.agents/skills/)
 - `install.sh` — Builds binary to ~/.local/bin/skill-tree
 
@@ -29,7 +30,6 @@ go build ./...        # compile check
 - Always use single-line commands (no backslash continuations) for CLI operations
 - Input validation: `store.ValidateLevel()` for levels 0-5, `store.ValidateStatus()` for scenario status
 - Multi-statement writes use transactions (`db.Begin()` / `tx.Commit()` / `defer tx.Rollback()`)
-- Exported TUI helpers (`tui.LevelLabel()`, `tui.LevelBar()`) are reused by CLI print functions
 - Database lives at `~/.skill-tree/skill-tree.db`, opened via `sqliteutil.OpenSQLite()`
 
 ## Data model

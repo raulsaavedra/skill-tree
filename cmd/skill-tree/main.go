@@ -8,14 +8,12 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/raulsaavedra/cli-core/pkg/output"
 	"github.com/raulsaavedra/cli-core/pkg/skills"
 	"github.com/raulsaavedra/cli-core/pkg/sqliteutil"
 	"github.com/spf13/cobra"
 
 	"github.com/raulsaavedra/skill-tree/internal/store"
-	"github.com/raulsaavedra/skill-tree/internal/tui"
 )
 
 func main() {
@@ -23,7 +21,7 @@ func main() {
 		Use:   "skill-tree",
 		Short: "Unified learning CLI: skill tree + quiz decks + scenarios",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runTree()
+			return cmd.Help()
 		},
 	}
 
@@ -33,8 +31,6 @@ func main() {
 		scenarioCmd(),
 		deckCmd(),
 		cardCmd(),
-		reviewCmd(),
-		treeCmd(),
 		importCmd(),
 	)
 
@@ -173,10 +169,10 @@ func skillCmd() *cobra.Command {
 				return output.JSON(skill)
 			}
 			fmt.Printf("ID: %d\nName: %s\nLevel: %d/5 %s\nDescription: %s\n",
-				skill.ID, skill.Name, skill.Level, tui.LevelLabel(skill.Level), skill.Description)
+				skill.ID, skill.Name, skill.Level, levelLabel(skill.Level), skill.Description)
 			printSkillLinks(skill.Decks, skill.Scenarios, "")
 			for _, child := range skill.Children {
-				fmt.Printf("\n%s (%d/5 %s)\n", child.Name, child.Level, tui.LevelLabel(child.Level))
+				fmt.Printf("\n%s (%d/5 %s)\n", child.Name, child.Level, levelLabel(child.Level))
 				printSkillLinks(child.Decks, child.Scenarios, "  ")
 			}
 			return nil
@@ -532,8 +528,8 @@ func deckCmd() *cobra.Command {
 				}
 				for _, sid := range skillIDs {
 					if err := st.LinkDeckSkill(deckID, sid); err != nil {
-					return err
-				}
+						return err
+					}
 				}
 				fmt.Printf("Created deck: %s\n", deckName)
 				return nil
@@ -1010,162 +1006,6 @@ func cardCmd() *cobra.Command {
 	return cmd
 }
 
-// --- review ---
-
-func reviewCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "review [deck]",
-		Short: "Start review session",
-		Args:  cobra.MaximumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			skillName, _ := cmd.Flags().GetString("skill")
-			if skillName != "" {
-				return runSkillReview(cmd, skillName)
-			}
-			return runReviewSession(cmd, args)
-		},
-	}
-	cmd.Flags().StringP("mode", "m", "auto", "Review mode (flashcard, mcq, auto)")
-	cmd.Flags().IntP("limit", "l", 200, "Max cards")
-	cmd.Flags().String("deck", "", "Deck name to review")
-	cmd.Flags().String("skill", "", "Review all cards for a skill")
-	return cmd
-}
-
-func runSkillReview(cmd *cobra.Command, skillName string) error {
-	limit, _ := cmd.Flags().GetInt("limit")
-	modeRaw, _ := cmd.Flags().GetString("mode")
-	mode := parseModeWithFallback(modeRaw)
-
-	st, err := openStore()
-	if err != nil {
-		return err
-	}
-	defer st.Close()
-
-	// Find skill by name
-	tree, err := st.SkillTree()
-	if err != nil {
-		return err
-	}
-	skill := findSkillByName(tree, skillName)
-	if skill == nil {
-		return fmt.Errorf("skill %q not found", skillName)
-	}
-
-	cards, err := st.CardsForSkill(skill.ID, limit)
-	if err != nil {
-		return err
-	}
-	if len(cards) == 0 {
-		fmt.Println("No cards found for skill.")
-		return nil
-	}
-
-	deck := store.Deck{ID: -1, Name: skillName + " (all)", CardCount: len(cards)}
-	decks := []store.Deck{deck}
-	cardsByDeck := map[int64][]store.Card{-1: cards}
-
-	model := tui.NewReviewModel(decks, cardsByDeck, 0, mode, true, st)
-	_, err = tea.NewProgram(model, tea.WithAltScreen()).Run()
-	return err
-}
-
-func runReviewSession(cmd *cobra.Command, args []string) error {
-	limit, _ := cmd.Flags().GetInt("limit")
-	modeRaw, _ := cmd.Flags().GetString("mode")
-	mode := parseModeWithFallback(modeRaw)
-
-	deckQuery := ""
-	flagDeck, _ := cmd.Flags().GetString("deck")
-	deckQuery = strings.TrimSpace(flagDeck)
-	if len(args) > 0 {
-		if deckQuery != "" {
-			return fmt.Errorf("specify either positional [deck] or --deck, not both")
-		}
-		deckQuery = strings.TrimSpace(args[0])
-	}
-
-	st, err := openStore()
-	if err != nil {
-		return err
-	}
-	defer st.Close()
-
-	decks, err := st.ListDecks()
-	if err != nil {
-		return err
-	}
-
-	cardsByDeck := make(map[int64][]store.Card, len(decks))
-	for _, deck := range decks {
-		cards, err := st.ListCards(deck.ID, limit)
-		if err != nil {
-			return err
-		}
-		cardsByDeck[deck.ID] = cards
-	}
-
-	selectedIndex := 0
-	startInReview := false
-	if deckQuery != "" {
-		for i, deck := range decks {
-			if strings.EqualFold(deck.Name, deckQuery) {
-				selectedIndex = i
-				startInReview = true
-				break
-			}
-		}
-	}
-
-	model := tui.NewReviewModel(decks, cardsByDeck, selectedIndex, mode, startInReview, st)
-	_, err = tea.NewProgram(model, tea.WithAltScreen()).Run()
-	return err
-}
-
-// --- tree ---
-
-func treeCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "tree",
-		Short: "Interactive skill tree TUI",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return runTree()
-		},
-	}
-}
-
-func runTree() error {
-	st, err := openStore()
-	if err != nil {
-		return err
-	}
-	defer st.Close()
-
-	ctx, err := st.FullContext()
-	if err != nil {
-		return err
-	}
-
-	allDecks, err := st.ListDecks()
-	if err != nil {
-		return err
-	}
-
-	cardsByDeck := make(map[int64][]store.Card, len(allDecks))
-	for _, deck := range allDecks {
-		cards, err := st.ListCards(deck.ID, 200)
-		if err != nil {
-			return err
-		}
-		cardsByDeck[deck.ID] = cards
-	}
-
-	model := tui.NewAppModel(ctx.Skills, allDecks, cardsByDeck, st)
-	_, err = tea.NewProgram(model, tea.WithAltScreen()).Run()
-	return err
-}
-
 // --- import ---
 
 func importCmd() *cobra.Command {
@@ -1355,14 +1195,6 @@ func normalizeCard(in rawCardInput) (store.Card, error) {
 	}, nil
 }
 
-func parseModeWithFallback(raw string) tui.ReviewMode {
-	mode, err := tui.ParseMode(raw)
-	if err != nil {
-		return tui.ModeAuto
-	}
-	return mode
-}
-
 func coverageText(covered, total int) string {
 	if total == 0 {
 		return "--"
@@ -1415,21 +1247,36 @@ func printSkillLinks(decks []store.Deck, scenarios []store.Scenario, indent stri
 func printSkillTree(skills []store.Skill, depth int) {
 	for _, s := range skills {
 		indent := strings.Repeat("  ", depth)
-		fmt.Printf("%s%s %s %d/5 %s\n", indent, s.Name, tui.LevelBar(s.Level), s.Level, tui.LevelLabel(s.Level))
+		fmt.Printf("%s%s %s %d/5 %s\n", indent, s.Name, levelBar(s.Level), s.Level, levelLabel(s.Level))
 		if len(s.Children) > 0 {
 			printSkillTree(s.Children, depth+1)
 		}
 	}
 }
 
-func findSkillByName(skills []store.Skill, name string) *store.Skill {
-	for i := range skills {
-		if strings.EqualFold(skills[i].Name, name) {
-			return &skills[i]
-		}
-		if found := findSkillByName(skills[i].Children, name); found != nil {
-			return found
-		}
+func levelLabel(level int) string {
+	labels := []string{
+		"Unaware",
+		"Novice",
+		"Beginner",
+		"Intermediate",
+		"Advanced",
+		"Expert",
 	}
-	return nil
+	if level < 0 || level >= len(labels) {
+		return "Unknown"
+	}
+	return labels[level]
+}
+
+func levelBar(level int) string {
+	if level < 0 {
+		level = 0
+	}
+	if level > 5 {
+		level = 5
+	}
+	filled := strings.Repeat("#", level)
+	empty := strings.Repeat("-", 5-level)
+	return "[" + filled + empty + "]"
 }

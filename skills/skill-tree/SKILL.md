@@ -146,7 +146,7 @@ This returns the full skill tree with levels, linked decks (with card counts), l
   - `tags`: optional set of tags.
 
 ### Markdown support
-The `answer` and `extra` fields support markdown formatting in the TUI:
+The `answer` and `extra` fields support markdown formatting in review UI:
 - `**bold**` renders as bold text
 - `*italic*` renders as italic text
 - `` `code` `` renders as yellow inline code
@@ -175,42 +175,20 @@ The `answer` and `extra` fields support markdown formatting in the TUI:
 
 ## Review
 
-### Review entrypoints
-- Review all decks (with TUI deck selector):
-  - `skill-tree review`
-- Review a specific deck:
-  - `skill-tree review --deck "VPC Fundamentals"`
-  - `skill-tree review "VPC Fundamentals"`
-- Review all cards linked to a skill (includes child skills):
-  - `skill-tree review --skill "VPC"`
-
-### Review mode (`--mode`)
-- `--mode flashcard`: show question, reveal answer + extra.
-- `--mode mcq`: show MCQ UI for cards with choices. Falls back to flashcard for cards without.
-- `--mode auto`: use MCQ when choices exist, otherwise flashcard.
-
-### Keyboard controls (TUI)
-- `enter`/`space`: reveal answer, then advance (marks card as covered)
-  - MCQ: auto-scores on reveal (correct choice = card covered)
-  - Flashcard: marks card as covered when advancing
-- `n`/`p`: next/previous card
-- `f`/`m`/`a`: switch to flashcard/mcq/auto mode
-- `j`/`k` or `up`/`down`: navigate MCQ choices
-- `q` or `ctrl+c`: quit
+### Web review entrypoints
+- Review is now web-first (`apps/web`) and launched contextually:
+  - Skill-tree deck coverage rows open deck review directly.
+  - Skill detail page can launch skill-scoped review.
+- Direct URLs:
+  - Deck review: `/review?deckId=<DECK_ID>&back=/`
+  - Skill review: `/review?skillId=<SKILL_ID>&back=/`
 
 ### Coverage scoring
 - Coverage = `covered cards / total deck cards` — tracks deliberate practice over time.
-- A card becomes "covered" when the learner advances past it with `enter`/`space` (MCQ: only if correct choice selected, flashcard: always on advance).
+- A card becomes "covered" when the learner advances in review (MCQ: only if correct choice selected, flashcard: on advance).
 - Coverage only goes up, never down. Once a card is covered, it stays covered permanently.
-- Works for both regular deck review and test mode (test mode attributes each card back to its source deck).
-- Coverage percentages appear in the deck selector, skill detail view, `deck list`, and `skill show`.
+- Coverage percentages appear in the web skill tree, skill detail view, `deck list`, and `skill show`.
 - Adding new cards to a deck lowers coverage (new material = new work to do).
-
-## Tree TUI
-```
-skill-tree tree
-```
-Interactive skill tree navigator. Navigate with `j`/`k`, expand/collapse with `enter`. Press `d` for skill detail (shows linked decks and scenarios), `enter` to start a review from detail view, `t` for test mode (shuffled cards from skill + children), `/` to search skills, `b` to go back, `q` to quit.
 
 ## Import from quiz CLI
 ```
@@ -260,12 +238,11 @@ Update levels based on demonstrated proficiency during sessions:
    - `skill-tree card delete --deck-id <DECK_ID> --card-ids "50,51,52-55"`
 5. Add new cards as needed with `skill-tree card add`.
 
-### TUI review
-When the learner wants to practice retrieval in the TUI:
-- First pass: `skill-tree review --deck "Deck Name" --mode flashcard`
-- Exam practice: `skill-tree review --deck "Deck Name" --mode mcq`
-- Mixed: `skill-tree review --deck "Deck Name" --mode auto`
-- Skill-scoped: `skill-tree review --skill "VPC"`
+### Review practice
+When the learner wants to practice retrieval:
+- Launch review from the web skill tree deck coverage row (deck-scoped review).
+- Launch review from skill detail for skill-scoped review.
+- Keep coverage expectations the same across modes (MCQ correctness gates coverage; flashcards mark on advance).
 
 ## Writing effective MCQ cards
 
@@ -294,4 +271,4 @@ Example:
 ## Notes
 - The CLI does not call LLMs or external APIs; it operates on local SQLite data.
 - Decks and cards are managed via CLI commands; SQLite is the canonical store.
-- The tree TUI provides a visual way to navigate skills and launch reviews.
+- The web app provides the primary visual way to navigate skills and launch reviews.

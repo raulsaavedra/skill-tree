@@ -9,8 +9,8 @@ This repo now also includes an in-progress web port:
 
 ## What it does
 
-- **Skill tree** — hierarchical skills with proficiency levels (0-5), navigate and review from an interactive TUI
-- **Quiz decks** — flashcard and multiple-choice review with markdown-rendered answers, mode switching, and pagination
+- **Skill tree** — hierarchical skills with proficiency levels (0-5), browsable in the web app
+- **Quiz decks** — flashcard and multiple-choice review in the web app with markdown-rendered answers
 - **Scenarios** — track hands-on projects linked to skills with status progression (planned → in_progress → completed)
 - **Linking** — decks and scenarios link to skills, so each skill shows its associated learning material
 - **Web review UI** — interactive review mode in Next.js (`/review`) with flashcard/MCQ/auto parity semantics
@@ -19,7 +19,7 @@ This repo now also includes an in-progress web port:
 
 ```
 ./install.sh
-skill-tree
+skill-tree --help
 ```
 
 ## Web + API (in progress)
@@ -40,7 +40,7 @@ npm run dev
 
 ## Stack
 
-- Go, Cobra (CLI), BubbleTea (TUI), Lipgloss (styling)
+- Go, Cobra (CLI)
 - Go `net/http` API server (`cmd/skill-tree-api`)
 - Next.js (App Router) + shadcn UI (`apps/web`)
 - SQLite via modernc.org/sqlite (pure Go, no CGO)
