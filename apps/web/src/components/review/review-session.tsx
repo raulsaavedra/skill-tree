@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { useRouter } from "next/navigation";
 
@@ -631,28 +631,73 @@ function PaginationDots({
   covered: Set<number>;
   onSelect: (index: number) => void;
 }) {
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const dragStateRef = useRef({
+    active: false,
+    pointerID: -1,
+    startX: 0,
+    startScrollLeft: 0,
+    moved: false,
+  });
+
   if (cards.length === 0) {
     return null;
   }
 
-  const maxDots = 40;
-  let start = 0;
-  let end = cards.length;
-  if (cards.length > maxDots) {
-    const half = Math.floor(maxDots / 2);
-    start = Math.max(0, current - half);
-    end = start + maxDots;
-    if (end > cards.length) {
-      end = cards.length;
-      start = Math.max(0, end - maxDots);
+  const onPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!scrollRef.current) {
+      return;
     }
-  }
+    dragStateRef.current = {
+      active: true,
+      pointerID: event.pointerId,
+      startX: event.clientX,
+      startScrollLeft: scrollRef.current.scrollLeft,
+      moved: false,
+    };
+    scrollRef.current.setPointerCapture(event.pointerId);
+  };
+
+  const onPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!scrollRef.current) {
+      return;
+    }
+    const dragState = dragStateRef.current;
+    if (!dragState.active || dragState.pointerID !== event.pointerId) {
+      return;
+    }
+
+    const delta = event.clientX - dragState.startX;
+    if (Math.abs(delta) > 2) {
+      dragStateRef.current.moved = true;
+    }
+    scrollRef.current.scrollLeft = dragState.startScrollLeft - delta;
+  };
+
+  const stopDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!scrollRef.current) {
+      return;
+    }
+    const dragState = dragStateRef.current;
+    if (!dragState.active || dragState.pointerID !== event.pointerId) {
+      return;
+    }
+    dragStateRef.current.active = false;
+    scrollRef.current.releasePointerCapture(event.pointerId);
+  };
 
   return (
-    <div className="flex items-center gap-1 text-sm leading-none">
-      {start > 0 ? <span className="text-muted-foreground">...</span> : null}
-      {cards.slice(start, end).map((card, index) => {
-        const absolute = start + index;
+    <div
+      className="w-full cursor-grab overflow-x-auto pb-1 active:cursor-grabbing [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      onPointerCancel={stopDrag}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={stopDrag}
+      ref={scrollRef}
+    >
+      <div className="flex min-w-max items-center gap-1 text-sm leading-none">
+        {cards.map((card, index) => {
+        const absolute = index;
         const coveredState = covered.has(card.id);
         const className =
           absolute === current
@@ -667,7 +712,13 @@ function PaginationDots({
             aria-label={`Go to card ${absolute + 1}`}
             className={`flex h-8 min-w-8 items-center justify-center rounded-full border px-2 text-xs font-semibold transition ${className}`}
             key={card.id}
-            onClick={() => onSelect(absolute)}
+            onClick={() => {
+              if (dragStateRef.current.moved) {
+                dragStateRef.current.moved = false;
+                return;
+              }
+              onSelect(absolute);
+            }}
             title={`Card ${absolute + 1}`}
             type="button"
           >
@@ -675,7 +726,7 @@ function PaginationDots({
           </button>
         );
       })}
-      {end < cards.length ? <span className="text-muted-foreground">...</span> : null}
+      </div>
     </div>
   );
 }
