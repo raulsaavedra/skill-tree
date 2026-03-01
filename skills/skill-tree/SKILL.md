@@ -190,11 +190,12 @@ The `answer` and `extra` fields support markdown formatting in review UI:
 - Coverage percentages appear in the web skill tree, skill detail view, `deck list`, and `skill show`.
 - Adding new cards to a deck lowers coverage (new material = new work to do).
 
-## Import from quiz CLI
+## Import from SQLite
+```bash
+cd apps/convex
+bun run import:sqlite
 ```
-skill-tree import --from-quiz
-```
-Imports all decks and cards from `~/.quiz/quiz.db` into skill-tree. Skips decks whose name already exists (idempotent). Does not delete the quiz database.
+Imports all skills, decks, cards, links, scenarios, and coverage from `~/.skill-tree/skill-tree.db` into Convex using snapshot replacement.
 
 ## Recommended flows
 

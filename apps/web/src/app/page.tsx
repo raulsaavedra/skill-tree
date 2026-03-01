@@ -24,16 +24,16 @@ export default async function Home() {
           </CardHeader>
           <CardContent className="space-y-3">
             <p className="text-sm text-muted-foreground">
-              Could not reach the Go backend.
+              Could not reach the Convex backend.
             </p>
             <pre className="overflow-x-auto rounded-md bg-muted p-3 text-xs">
               {loadError}
             </pre>
             <p className="text-sm text-muted-foreground">
-              Start the API server:
+              Start Convex dev:
             </p>
             <pre className="overflow-x-auto rounded-md bg-muted p-3 text-xs">
-              GOWORK=off go run ./apps/api -addr :8080
+              cd apps/convex && bun run dev
             </pre>
           </CardContent>
         </Card>
@@ -56,7 +56,7 @@ export default async function Home() {
         <header className="space-y-3">
           <div className="flex flex-col gap-2">
             <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-              Next.js + shadcn + Go API
+              Next.js + shadcn + Convex
             </p>
             <h1 className="text-3xl font-semibold tracking-tight">skill-tree</h1>
           </div>

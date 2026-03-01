@@ -8,15 +8,16 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
+import {
+  getCoveredCardIDsClient,
+  getDeckCardsClient,
+  markCardCoveredClient,
+} from "@/lib/skill-tree-client";
 import type { Card as ReviewCard, DeckSummary } from "@/lib/skill-tree-types";
 
 type ReviewStage = "deck_select" | "review" | "done";
 type ReviewMode = "flashcard" | "mcq" | "auto";
 type EffectiveMode = "flashcard" | "mcq";
-
-interface CoveredResponse {
-  covered_ids: number[];
-}
 
 interface ReviewSessionProps {
   initialDecks: DeckSummary[];
@@ -89,25 +90,14 @@ export function ReviewSession({ initialDecks, initialSession }: ReviewSessionPro
       setError(null);
 
       try {
-        const cardsResponse = await fetch(`/api/decks/${deck.id}/cards?limit=200`, {
-          cache: "no-store",
-        });
-        if (!cardsResponse.ok) {
-          throw new Error(`Unable to load deck cards (${cardsResponse.status})`);
-        }
-        const nextCards = (await cardsResponse.json()) as ReviewCard[];
+        const nextCards = await getDeckCardsClient(deck.id, 200);
         let nextCovered = new Set<number>();
 
         if (nextCards.length > 0) {
-          const ids = nextCards.map((card) => card.id).join(",");
-          const coveredResponse = await fetch(`/api/cards/covered?ids=${ids}`, {
-            cache: "no-store",
-          });
-          if (!coveredResponse.ok) {
-            throw new Error(`Unable to load covered cards (${coveredResponse.status})`);
-          }
-          const coveredData = (await coveredResponse.json()) as CoveredResponse;
-          nextCovered = new Set(coveredData.covered_ids ?? []);
+          const coveredIDs = await getCoveredCardIDsClient(
+            nextCards.map((card) => card.id),
+          );
+          nextCovered = new Set(coveredIDs);
         }
 
         setActiveDeck(deck);
@@ -170,12 +160,7 @@ export function ReviewSession({ initialDecks, initialSession }: ReviewSessionPro
       if (coveredIDs.has(cardID)) {
         return;
       }
-      const response = await fetch(`/api/cards/${cardID}/cover`, {
-        method: "POST",
-      });
-      if (!response.ok) {
-        throw new Error(`Unable to update coverage (${response.status})`);
-      }
+      await markCardCoveredClient(cardID);
       setCoveredIDs((prev) => {
         const next = new Set(prev);
         next.add(cardID);

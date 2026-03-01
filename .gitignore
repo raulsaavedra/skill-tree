@@ -2,3 +2,7 @@
 *.db-journal
 *.db-wal
 *.db-shm
+node_modules
+**/node_modules
+**/.next
+*.bun-build

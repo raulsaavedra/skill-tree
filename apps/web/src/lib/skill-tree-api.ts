@@ -1,5 +1,7 @@
 import "server-only";
 
+import { ConvexHttpClient } from "convex/browser";
+
 import type {
   Card,
   ContextResponse,
@@ -7,61 +9,86 @@ import type {
   SkillNode,
 } from "@/lib/skill-tree-types";
 
-const DEFAULT_API_BASE_URL = "http://127.0.0.1:8080";
+function convexUrl(): string {
+  const raw =
+    process.env.CONVEX_URL?.trim() ?? process.env.NEXT_PUBLIC_CONVEX_URL?.trim();
+  if (raw && raw.length > 0) {
+    return raw;
+  }
+  throw new Error("Missing CONVEX_URL (or NEXT_PUBLIC_CONVEX_URL)");
+}
 
-function apiBaseUrl(): string {
-  const raw = process.env.SKILL_TREE_API_BASE_URL?.trim();
-  return raw && raw.length > 0 ? raw : DEFAULT_API_BASE_URL;
+function convexClient(): ConvexHttpClient {
+  return new ConvexHttpClient(convexUrl());
 }
 
 export async function getContext(): Promise<ContextResponse> {
-  return getJSON<ContextResponse>("/v1/context");
+  return queryFunction<ContextResponse>("context:get", {});
 }
 
 export async function getDecks(): Promise<DeckSummary[]> {
-  return getJSON<DeckSummary[]>("/v1/decks");
+  return queryFunction<DeckSummary[]>("decks:list", {});
 }
 
 export async function getDeckCards(deckID: number, limit = 200): Promise<Card[]> {
-  return getJSON<Card[]>(`/v1/decks/${deckID}/cards?limit=${limit}`);
+  return queryFunction<Card[]>("decks:cards", {
+    deck_id: deckID,
+    limit,
+  });
 }
 
 export async function getSkill(skillID: number): Promise<SkillNode> {
-  return getJSON<SkillNode>(`/v1/skills/${skillID}`);
+  return queryFunction<SkillNode>("skills:get", {
+    skill_id: skillID,
+  });
 }
 
 export async function getSkillCards(skillID: number, limit = 200): Promise<Card[]> {
-  return getJSON<Card[]>(`/v1/skills/${skillID}/cards?limit=${limit}`);
+  return queryFunction<Card[]>("skills:cards", {
+    skill_id: skillID,
+    limit,
+  });
 }
 
 export async function getCoveredCardIDs(cardIDs: number[]): Promise<number[]> {
   if (cardIDs.length === 0) {
     return [];
   }
-  const data = await getJSON<{ covered_ids: number[] }>(
-    `/v1/cards/covered?ids=${cardIDs.join(",")}`,
-  );
-  return data.covered_ids ?? [];
+  return queryFunction<number[]>("coverage:coveredIds", {
+    card_ids: cardIDs,
+  });
 }
 
 export async function markCardCovered(cardID: number): Promise<void> {
-  const response = await fetch(`${apiBaseUrl()}/v1/cards/${cardID}/cover`, {
-    method: "POST",
-    cache: "no-store",
+  await mutationFunction("coverage:markCovered", {
+    card_id: cardID,
   });
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`Go API ${response.status}: ${body || response.statusText}`);
+}
+
+async function queryFunction<T>(
+  functionName: string,
+  args: Record<string, unknown>,
+): Promise<T> {
+  const client = convexClient();
+  try {
+    return (await client.query(functionName as never, args as never)) as T;
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Unknown Convex query error";
+    throw new Error(`Convex query ${functionName} failed: ${message}`);
   }
 }
 
-async function getJSON<T>(path: string): Promise<T> {
-  const response = await fetch(`${apiBaseUrl()}${path}`, {
-    cache: "no-store",
-  });
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`Go API ${response.status}: ${body || response.statusText}`);
+async function mutationFunction(
+  functionName: string,
+  args: Record<string, unknown>,
+): Promise<void> {
+  const client = convexClient();
+  try {
+    await client.mutation(functionName as never, args as never);
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Unknown Convex mutation error";
+    throw new Error(`Convex mutation ${functionName} failed: ${message}`);
   }
-  return (await response.json()) as T;
 }

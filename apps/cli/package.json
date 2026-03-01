@@ -1,0 +1,18 @@
+{
+  "name": "@skill-tree/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "bun run src/main.ts"
+  },
+  "bin": {
+    "skill-tree": "./src/main.ts"
+  },
+  "dependencies": {
+    "convex": "^1.32.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1"
+  }
+}

@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "skill-tree web",
-  description: "Next.js frontend for the skill-tree Go backend",
+  description: "Next.js frontend for the skill-tree Convex backend",
 };
 
 export default function RootLayout({
