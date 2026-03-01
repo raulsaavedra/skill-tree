@@ -9,6 +9,8 @@
 - `internal/httpapi/handler.go` — REST API handlers used by the web app
 - `apps/web/src/app/page.tsx` — web dashboard and skill tree
 - `apps/web/src/components/skill-tree/skill-tree-explorer.tsx` — interactive skill tree UI
+- `apps/web/src/components/review/review-session.tsx` — interactive review session UI
+- `apps/web/src/lib/skill-tree-api.ts` — server-side web data access to Go API
 - `skills/skill-tree/SKILL.md` — Claude skill definition (installed to ~/.agents/skills/)
 - `install.sh` — Builds binary to ~/.local/bin/skill-tree
 
@@ -24,6 +26,7 @@ go build ./...        # compile check
 
 - Uses `cli-core` from `../packages/cli-core` (local replace in go.mod)
 - Part of the Go workspace at `~/src/go.work`
+- Web app reads API base URL from `SKILL_TREE_API_BASE_URL` (defaults to `http://127.0.0.1:8080`)
 
 ## Conventions
 
