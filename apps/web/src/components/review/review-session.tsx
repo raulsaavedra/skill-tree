@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
+import { useRouter } from "next/navigation";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -19,19 +20,47 @@ interface CoveredResponse {
 
 interface ReviewSessionProps {
   initialDecks: DeckSummary[];
+  initialSession?: {
+    label: string;
+    cards: ReviewCard[];
+    coveredIDs: number[];
+    backHref?: string;
+  };
 }
 
-export function ReviewSession({ initialDecks }: ReviewSessionProps) {
+export function ReviewSession({ initialDecks, initialSession }: ReviewSessionProps) {
+  const router = useRouter();
   const [decks, setDecks] = useState(initialDecks);
-  const [stage, setStage] = useState<ReviewStage>("deck_select");
+  const [stage, setStage] = useState<ReviewStage>(() => {
+    if (!initialSession) {
+      return "deck_select";
+    }
+    return initialSession.cards.length > 0 ? "review" : "done";
+  });
+  const [lockedSession] = useState(Boolean(initialSession));
+  const [lockedBackHref] = useState(initialSession?.backHref ?? null);
   const [deckCursor, setDeckCursor] = useState(0);
-  const [activeDeck, setActiveDeck] = useState<DeckSummary | null>(null);
-  const [cards, setCards] = useState<ReviewCard[]>([]);
+  const [activeDeck, setActiveDeck] = useState<DeckSummary | null>(() => {
+    if (!initialSession) {
+      return null;
+    }
+    return {
+      id: -1,
+      name: initialSession.label,
+      description: "",
+      card_count: initialSession.cards.length,
+      covered_count: initialSession.coveredIDs.length,
+      updated_at: "",
+    };
+  });
+  const [cards, setCards] = useState<ReviewCard[]>(initialSession?.cards ?? []);
   const [cardCursor, setCardCursor] = useState(0);
   const [choiceCursor, setChoiceCursor] = useState(0);
   const [showAnswer, setShowAnswer] = useState(false);
   const [mode, setMode] = useState<ReviewMode>("auto");
-  const [coveredIDs, setCoveredIDs] = useState<Set<number>>(new Set());
+  const [coveredIDs, setCoveredIDs] = useState<Set<number>>(
+    new Set(initialSession?.coveredIDs ?? []),
+  );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -215,6 +244,14 @@ export function ReviewSession({ initialDecks }: ReviewSessionProps) {
   ]);
 
   const backToDecks = useCallback(() => {
+    if (lockedSession) {
+      if (lockedBackHref) {
+        router.push(lockedBackHref);
+        return;
+      }
+      router.push("/review");
+      return;
+    }
     setStage("deck_select");
     setActiveDeck(null);
     setCards([]);
@@ -222,7 +259,7 @@ export function ReviewSession({ initialDecks }: ReviewSessionProps) {
     setCardCursor(0);
     setChoiceCursor(0);
     setShowAnswer(false);
-  }, []);
+  }, [lockedBackHref, lockedSession, router]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -419,7 +456,7 @@ export function ReviewSession({ initialDecks }: ReviewSessionProps) {
             {cards.length === 0 ? "No cards in selected deck." : "Finished review session."}
           </p>
           <Button onClick={backToDecks} variant="secondary">
-            Back to Decks
+            {lockedSession ? "Back" : "Back to Decks"}
           </Button>
         </CardContent>
       </Card>
@@ -453,7 +490,7 @@ export function ReviewSession({ initialDecks }: ReviewSessionProps) {
           </p>
         ) : null}
 
-        <p className="text-lg font-semibold">{currentCard?.question}</p>
+        <p className="text-base font-semibold sm:text-lg">{currentCard?.question}</p>
 
         {effectiveMode === "mcq" && currentCard && hasChoices(currentCard) ? (
           <div className="space-y-2">
@@ -507,7 +544,7 @@ export function ReviewSession({ initialDecks }: ReviewSessionProps) {
             Next
           </Button>
           <Button onClick={backToDecks} variant="ghost">
-            Back to Decks
+            {lockedSession ? "Back" : "Back to Decks"}
           </Button>
         </div>
 

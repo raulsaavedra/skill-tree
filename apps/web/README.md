@@ -36,6 +36,7 @@ Open [http://localhost:3000](http://localhost:3000) with your browser to see the
 - Next UI:
   - `src/app/page.tsx` dashboard
   - `src/app/review/page.tsx` interactive quiz review
+  - `src/app/skills/[skillId]/page.tsx` skill detail (decks + scenarios + skill review)
 
 ## Scripts
 

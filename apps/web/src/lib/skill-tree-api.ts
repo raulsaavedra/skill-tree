@@ -1,6 +1,11 @@
 import "server-only";
 
-import type { Card, ContextResponse, DeckSummary } from "@/lib/skill-tree-types";
+import type {
+  Card,
+  ContextResponse,
+  DeckSummary,
+  SkillNode,
+} from "@/lib/skill-tree-types";
 
 const DEFAULT_API_BASE_URL = "http://127.0.0.1:8080";
 
@@ -19,6 +24,14 @@ export async function getDecks(): Promise<DeckSummary[]> {
 
 export async function getDeckCards(deckID: number, limit = 200): Promise<Card[]> {
   return getJSON<Card[]>(`/v1/decks/${deckID}/cards?limit=${limit}`);
+}
+
+export async function getSkill(skillID: number): Promise<SkillNode> {
+  return getJSON<SkillNode>(`/v1/skills/${skillID}`);
+}
+
+export async function getSkillCards(skillID: number, limit = 200): Promise<Card[]> {
+  return getJSON<Card[]>(`/v1/skills/${skillID}/cards?limit=${limit}`);
 }
 
 export async function getCoveredCardIDs(cardIDs: number[]): Promise<number[]> {

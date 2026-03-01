@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -44,6 +45,7 @@ func New(st *store.Store, cfg Config) http.Handler {
 	mux.HandleFunc("/healthz", h.handleHealth)
 	mux.HandleFunc("/v1/context", h.handleContext)
 	mux.HandleFunc("/v1/skills/tree", h.handleSkillTree)
+	mux.HandleFunc("/v1/skills/", h.handleSkillByPath)
 	mux.HandleFunc("/v1/decks", h.handleDecks)
 	mux.HandleFunc("/v1/decks/", h.handleDeckByPath)
 	mux.HandleFunc("/v1/scenarios", h.handleScenarios)
@@ -153,6 +155,65 @@ func (h *handler) handleDeckByPath(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.writeJSON(w, http.StatusOK, cards)
+}
+
+func (h *handler) handleSkillByPath(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimPrefix(r.URL.Path, "/v1/skills/")
+	parts := strings.Split(path, "/")
+
+	if len(parts) == 1 && parts[0] != "" {
+		if r.Method != http.MethodGet {
+			h.writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		skillID, err := parseInt64(parts[0], "skill id")
+		if err != nil {
+			h.writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		skill, err := h.st.GetSkill(skillID)
+		if err != nil {
+			if errorsIsNoRows(err) {
+				h.writeError(w, http.StatusNotFound, "skill not found")
+				return
+			}
+			h.writeError(w, http.StatusInternalServerError, fmt.Sprintf("load skill: %v", err))
+			return
+		}
+		h.writeJSON(w, http.StatusOK, skill)
+		return
+	}
+
+	if len(parts) == 2 && parts[1] == "cards" {
+		if r.Method != http.MethodGet {
+			h.writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		skillID, err := parseInt64(parts[0], "skill id")
+		if err != nil {
+			h.writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		limit := 200
+		limitRaw := strings.TrimSpace(r.URL.Query().Get("limit"))
+		if limitRaw != "" {
+			value, err := strconv.Atoi(limitRaw)
+			if err != nil || value <= 0 {
+				h.writeError(w, http.StatusBadRequest, "limit must be a positive integer")
+				return
+			}
+			limit = value
+		}
+		cards, err := h.st.CardsForSkill(skillID, limit)
+		if err != nil {
+			h.writeError(w, http.StatusInternalServerError, fmt.Sprintf("load skill cards: %v", err))
+			return
+		}
+		h.writeJSON(w, http.StatusOK, cards)
+		return
+	}
+
+	h.writeError(w, http.StatusNotFound, "not found")
 }
 
 func (h *handler) handleCardsCovered(w http.ResponseWriter, r *http.Request) {
@@ -279,4 +340,8 @@ func parseInt64(raw, label string) (int64, error) {
 		return 0, fmt.Errorf("invalid %s", label)
 	}
 	return parsed, nil
+}
+
+func errorsIsNoRows(err error) bool {
+	return strings.Contains(err.Error(), sql.ErrNoRows.Error())
 }
