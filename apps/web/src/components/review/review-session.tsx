@@ -167,6 +167,17 @@ export function ReviewSession({ initialDecks, initialSession }: ReviewSessionPro
     [cards.length, resetRevealState],
   );
 
+  const goToCard = useCallback(
+    (index: number) => {
+      if (cards.length === 0) {
+        return;
+      }
+      setCardCursor(() => Math.min(Math.max(index, 0), cards.length - 1));
+      resetRevealState();
+    },
+    [cards.length, resetRevealState],
+  );
+
   const markCovered = useCallback(
     async (cardID: number) => {
       if (coveredIDs.has(cardID)) {
@@ -472,10 +483,10 @@ export function ReviewSession({ initialDecks, initialSession }: ReviewSessionPro
 
   return (
     <Card className={REVIEW_CARD_CLASS}>
-      <CardHeader className={`${COMPACT_SECTION_CLASS} space-y-2`}>
+      <CardHeader className={`${COMPACT_SECTION_CLASS} space-y-3`}>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <CardTitle>Review</CardTitle>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Badge variant={isCovered ? "default" : "secondary"}>
               {cardCursor + 1}/{cards.length}
             </Badge>
@@ -483,7 +494,23 @@ export function ReviewSession({ initialDecks, initialSession }: ReviewSessionPro
             {activeDeck ? <Badge variant="secondary">{activeDeck.name}</Badge> : null}
           </div>
         </div>
-        <PaginationDots cards={cards} current={cardCursor} covered={coveredIDs} />
+        <div className="flex flex-wrap items-center gap-2">
+          <Button onClick={backToDecks} size="sm" variant="ghost">
+            {lockedSession ? "Back" : "Back to Decks"}
+          </Button>
+          <Button onClick={prevCard} size="sm" variant="secondary">
+            Prev
+          </Button>
+          <Button onClick={nextCard} size="sm" variant="secondary">
+            Next
+          </Button>
+        </div>
+        <PaginationDots
+          cards={cards}
+          current={cardCursor}
+          covered={coveredIDs}
+          onSelect={goToCard}
+        />
       </CardHeader>
       <CardContent className={`${COMPACT_SECTION_CLASS} space-y-4`}>
         {error ? (
@@ -535,18 +562,9 @@ export function ReviewSession({ initialDecks, initialSession }: ReviewSessionPro
           </div>
         ) : null}
 
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex items-center">
           <Button onClick={() => void revealOrAdvance()}>
             {showAnswer ? "Next Card" : "Reveal"}
-          </Button>
-          <Button onClick={prevCard} variant="secondary">
-            Prev
-          </Button>
-          <Button onClick={nextCard} variant="secondary">
-            Next
-          </Button>
-          <Button onClick={backToDecks} variant="ghost">
-            {lockedSession ? "Back" : "Back to Decks"}
           </Button>
         </div>
 
@@ -606,10 +624,12 @@ function PaginationDots({
   cards,
   current,
   covered,
+  onSelect,
 }: {
   cards: ReviewCard[];
   current: number;
   covered: Set<number>;
+  onSelect: (index: number) => void;
 }) {
   if (cards.length === 0) {
     return null;
@@ -637,15 +657,22 @@ function PaginationDots({
         const className =
           absolute === current
             ? coveredState
-              ? "text-emerald-400"
-              : "text-foreground"
+              ? "border-emerald-500/70 bg-emerald-500/20 text-emerald-200"
+              : "border-primary/70 bg-primary/15 text-foreground"
             : coveredState
-              ? "text-emerald-700"
-              : "text-muted-foreground";
+              ? "border-emerald-700/60 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20"
+              : "border-border bg-muted/30 text-muted-foreground hover:bg-muted/60";
         return (
-          <span className={className} key={card.id}>
-            •
-          </span>
+          <button
+            aria-label={`Go to card ${absolute + 1}`}
+            className={`flex h-8 min-w-8 items-center justify-center rounded-full border px-2 text-xs font-semibold transition ${className}`}
+            key={card.id}
+            onClick={() => onSelect(absolute)}
+            title={`Card ${absolute + 1}`}
+            type="button"
+          >
+            {absolute + 1}
+          </button>
         );
       })}
       {end < cards.length ? <span className="text-muted-foreground">...</span> : null}
