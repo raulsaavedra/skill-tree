@@ -146,14 +146,16 @@ function SkillTreeList({
               role={hasChildren ? "button" : undefined}
               tabIndex={hasChildren ? 0 : undefined}
             >
-              <span
-                aria-hidden
-                className={cn(
-                  "absolute inset-y-3 left-1.5 w-0.5 rounded-full sm:left-2 sm:w-1",
-                  theme.rail,
-                )}
-              />
-              <div className="pl-3 sm:pl-4">
+              {depth === 0 ? (
+                <span
+                  aria-hidden
+                  className={cn(
+                    "absolute inset-y-3 left-1.5 w-0.5 rounded-full sm:left-2 sm:w-1",
+                    theme.rail,
+                  )}
+                />
+              ) : null}
+              <div className={cn(depth === 0 ? "pl-3 sm:pl-4" : "pl-0")}>
                 <div className="space-y-2 sm:flex sm:flex-wrap sm:items-center sm:justify-between sm:gap-2 sm:space-y-0">
                   <p className="font-medium leading-snug">{skill.name}</p>
                   <div className="flex flex-wrap items-center gap-2 text-xs sm:text-sm">
