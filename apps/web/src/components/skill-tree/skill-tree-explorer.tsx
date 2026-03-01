@@ -109,7 +109,7 @@ function SkillTreeList({
       className={
         depth === 0
           ? "space-y-6"
-          : "mt-6 ml-2 space-y-6 border-l-2 border-border/80 pl-7 sm:pl-11"
+          : "mt-6 ml-1 space-y-6 border-l-2 border-border/80 pl-4 sm:ml-2 sm:pl-11"
       }
     >
       {skills.map((skill) => {
@@ -161,8 +161,8 @@ function SkillTreeList({
                 )}
               />
               <div className="pl-4">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="font-medium">{skill.name}</p>
+                <div className="space-y-1.5 sm:flex sm:flex-wrap sm:items-center sm:justify-between sm:gap-2 sm:space-y-0">
+                  <p className="font-medium leading-snug">{skill.name}</p>
                   <div className="flex flex-wrap items-center gap-2">
                     {hasChildren ? (
                       <span className="rounded-full border border-border bg-background px-2 py-0.5 text-[11px] font-medium text-foreground/80">
@@ -178,7 +178,7 @@ function SkillTreeList({
                   </div>
                 </div>
                 {skill.description ? (
-                  <p className="mt-1 text-sm text-muted-foreground">
+                  <p className="mt-3 mb-1.5 text-sm text-muted-foreground sm:mt-1 sm:mb-0.5">
                     {skill.description}
                   </p>
                 ) : null}
@@ -246,7 +246,7 @@ function DeckCoverage({ deck }: { deck: DeckSummary }) {
 
   return (
     <Link
-      className="block w-full rounded-md bg-muted/40 p-2 text-xs transition hover:bg-muted/55"
+      className="block w-full rounded-md bg-muted/40 p-2.5 text-xs transition hover:bg-muted/55 sm:p-3"
       href={`/review?deckId=${deck.id}&back=/`}
       onClick={(event) => {
         event.stopPropagation();
