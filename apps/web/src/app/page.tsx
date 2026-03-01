@@ -33,7 +33,7 @@ export default async function Home() {
               Start the API server:
             </p>
             <pre className="overflow-x-auto rounded-md bg-muted p-3 text-xs">
-              GOWORK=off go run ./cmd/skill-tree-api -addr :8080
+              GOWORK=off go run ./apps/api -addr :8080
             </pre>
           </CardContent>
         </Card>

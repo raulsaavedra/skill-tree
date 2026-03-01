@@ -6,7 +6,7 @@ BIN_NAME="skill-tree"
 INSTALL_DIR="${INSTALL_DIR:-${HOME}/.local/bin}"
 
 mkdir -p "${INSTALL_DIR}"
-go build -o "${INSTALL_DIR}/${BIN_NAME}" "${ROOT_DIR}/cmd/${BIN_NAME}"
+go build -o "${INSTALL_DIR}/${BIN_NAME}" "${ROOT_DIR}/apps/cli"
 chmod +x "${INSTALL_DIR}/${BIN_NAME}"
 
 echo "Installed ${BIN_NAME} to ${INSTALL_DIR}/${BIN_NAME}"

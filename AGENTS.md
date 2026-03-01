@@ -2,8 +2,8 @@
 
 ## Layout
 
-- `cmd/skill-tree/main.go` — CLI entry point, all Cobra commands
-- `cmd/skill-tree-api/main.go` — Go HTTP API entry point
+- `apps/cli/main.go` — CLI entry point, all Cobra commands
+- `apps/api/main.go` — Go HTTP API entry point
 - `internal/store/store.go` — SQLite schema, migrations, all CRUD operations
 - `internal/store/store_test.go` — Store tests (run with `go test ./...`)
 - `internal/httpapi/handler.go` — REST API handlers used by the web app

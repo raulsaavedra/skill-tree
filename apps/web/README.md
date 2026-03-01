@@ -7,7 +7,7 @@ Next.js + shadcn frontend for `skill-tree`, using a Go backend API as the source
 1. Start the Go API from repo root:
 
 ```bash
-GOWORK=off go run ./cmd/skill-tree-api -addr :8080
+GOWORK=off go run ./apps/api -addr :8080
 ```
 
 2. Configure API base URL:
@@ -26,7 +26,7 @@ Open [http://localhost:3000](http://localhost:3000) with your browser to see the
 
 ## Architecture
 
-- Go API: `cmd/skill-tree-api` (`/healthz`, `/v1/context`, `/v1/skills/tree`, `/v1/decks`, `/v1/scenarios`)
+- Go API: `apps/api` (`/healthz`, `/v1/context`, `/v1/skills/tree`, `/v1/decks`, `/v1/scenarios`)
 - Next backend routes:
   - `src/app/api/context/route.ts`
   - `src/app/api/decks/route.ts`
