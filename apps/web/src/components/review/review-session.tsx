@@ -18,6 +18,8 @@ import type { Card as ReviewCard, DeckSummary } from "@/lib/skill-tree-types";
 type ReviewStage = "deck_select" | "review" | "done";
 type ReviewMode = "flashcard" | "mcq" | "auto";
 type EffectiveMode = "flashcard" | "mcq";
+const COMPACT_SECTION_CLASS = "mx-auto w-full max-w-3xl";
+const REVIEW_CARD_CLASS = "w-full gap-4 py-4 sm:py-8";
 
 interface ReviewSessionProps {
   initialDecks: DeckSummary[];
@@ -376,11 +378,11 @@ export function ReviewSession({ initialDecks, initialSession }: ReviewSessionPro
 
   if (stage === "deck_select") {
     return (
-      <Card>
-        <CardHeader>
+      <Card className={REVIEW_CARD_CLASS}>
+        <CardHeader className={COMPACT_SECTION_CLASS}>
           <CardTitle>Select a Deck</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-3">
+        <CardContent className={`${COMPACT_SECTION_CLASS} space-y-3`}>
           {error ? (
             <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
               {error}
@@ -432,11 +434,11 @@ export function ReviewSession({ initialDecks, initialSession }: ReviewSessionPro
 
   if (stage === "done") {
     return (
-      <Card>
-        <CardHeader>
+      <Card className={REVIEW_CARD_CLASS}>
+        <CardHeader className={COMPACT_SECTION_CLASS}>
           <CardTitle>Review Complete</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-3">
+        <CardContent className={`${COMPACT_SECTION_CLASS} space-y-3`}>
           <p className="text-sm text-muted-foreground">
             {cards.length === 0 ? "No cards in selected deck." : "Finished review session."}
           </p>
@@ -454,8 +456,8 @@ export function ReviewSession({ initialDecks, initialSession }: ReviewSessionPro
   const isCovered = currentCard ? coveredIDs.has(currentCard.id) : false;
 
   return (
-    <Card className="gap-4">
-      <CardHeader className="space-y-2">
+    <Card className={REVIEW_CARD_CLASS}>
+      <CardHeader className={`${COMPACT_SECTION_CLASS} space-y-2`}>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <CardTitle>Review</CardTitle>
           <div className="flex items-center gap-2">
@@ -468,7 +470,7 @@ export function ReviewSession({ initialDecks, initialSession }: ReviewSessionPro
         </div>
         <PaginationDots cards={cards} current={cardCursor} covered={coveredIDs} />
       </CardHeader>
-      <CardContent className="space-y-4">
+      <CardContent className={`${COMPACT_SECTION_CLASS} space-y-4`}>
         {error ? (
           <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
             {error}
