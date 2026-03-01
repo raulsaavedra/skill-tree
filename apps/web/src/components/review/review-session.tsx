@@ -469,8 +469,8 @@ export function ReviewSession({ initialDecks, initialSession }: ReviewSessionPro
   const isCovered = currentCard ? coveredIDs.has(currentCard.id) : false;
 
   return (
-    <Card>
-      <CardHeader className="space-y-3">
+    <Card className="gap-4">
+      <CardHeader className="space-y-2">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <CardTitle>Review</CardTitle>
           <div className="flex items-center gap-2">
@@ -490,10 +490,10 @@ export function ReviewSession({ initialDecks, initialSession }: ReviewSessionPro
           </p>
         ) : null}
 
-        <p className="text-base font-semibold sm:text-lg">{currentCard?.question}</p>
+        <p className="mb-2 text-base font-semibold sm:text-lg">{currentCard?.question}</p>
 
         {effectiveMode === "mcq" && currentCard && hasChoices(currentCard) ? (
-          <div className="space-y-2">
+          <div className="mt-2 mb-5 space-y-2 sm:mt-3 sm:mb-6">
             {currentCard.choices.map((choice, index) => {
               const selected = index === choiceCursor;
               const isCorrect = currentCard.correct_index === index;
@@ -522,7 +522,7 @@ export function ReviewSession({ initialDecks, initialSession }: ReviewSessionPro
         ) : null}
 
         {showAnswer ? (
-          <div className="space-y-2 rounded-md border border-emerald-500/40 bg-emerald-500/10 p-3">
+          <div className="mb-3 space-y-2 rounded-md border border-emerald-500/40 bg-emerald-500/10 p-3 sm:mb-4">
             <p className="text-sm font-semibold text-emerald-300">Answer</p>
             <MarkdownBlock content={answer} />
             {currentCard?.extra?.trim() ? (
@@ -627,7 +627,7 @@ function PaginationDots({
   }
 
   return (
-    <div className="flex items-center gap-0.5 text-xs">
+    <div className="flex items-center gap-1 text-sm leading-none">
       {start > 0 ? <span className="text-muted-foreground">...</span> : null}
       {cards.slice(start, end).map((card, index) => {
         const absolute = start + index;
