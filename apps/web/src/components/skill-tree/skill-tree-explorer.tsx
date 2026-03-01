@@ -129,7 +129,7 @@ function SkillTreeList({
         };
 
         return (
-          <div key={skill.id} className="space-y-4 sm:space-y-6">
+          <div key={skill.id} className="space-y-2 sm:space-y-3">
             <div
               aria-expanded={hasChildren ? isExpanded : undefined}
               className={cn(
