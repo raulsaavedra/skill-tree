@@ -1,7 +1,7 @@
 import { SkillTreeExplorer } from "@/components/skill-tree/skill-tree-explorer";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getContext } from "@/lib/skill-tree-api";
-import type { ContextResponse, SkillNode } from "@/lib/skill-tree-types";
+import type { ContextResponse } from "@/lib/skill-tree-types";
 
 export const dynamic = "force-dynamic";
 
@@ -45,11 +45,6 @@ export default async function Home() {
     return null;
   }
 
-  const totalSkills = countSkills(context.skills);
-  const totalDecks = countDecks(context.skills);
-  const totalCards = countCards(context.skills);
-  const activeScenarios = context.active_scenarios.length;
-
   return (
     <main className="min-h-screen bg-muted/20">
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-6 py-8">
@@ -66,84 +61,14 @@ export default async function Home() {
           </p>
         </header>
 
-        <section className="grid gap-4 md:grid-cols-4">
-          <StatCard label="Skills" value={totalSkills} />
-          <StatCard label="Decks" value={totalDecks} />
-          <StatCard label="Cards" value={totalCards} />
-          <StatCard label="Active Scenarios" value={activeScenarios} />
-        </section>
-
-        <section>
-          <Card className="w-full">
-            <CardHeader className="text-left">
-              <div className="mx-auto w-full max-w-3xl">
-                <CardTitle>Skill Tree</CardTitle>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="mx-auto w-full max-w-3xl">
-                {context.skills.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">
-                    No skills found yet.
-                  </p>
-                ) : (
-                  <SkillTreeExplorer skills={context.skills} />
-                )}
-              </div>
-            </CardContent>
-          </Card>
+        <section className="w-full max-w-3xl">
+          {context.skills.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No skills found yet.</p>
+          ) : (
+            <SkillTreeExplorer skills={context.skills} />
+          )}
         </section>
       </div>
     </main>
   );
-}
-
-function StatCard({ label, value }: { label: string; value: number }) {
-  return (
-    <Card className="border-0 shadow-none">
-      <CardHeader className="pb-2">
-        <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-          {label}
-        </p>
-      </CardHeader>
-      <CardContent>
-        <p className="text-2xl font-semibold">{value}</p>
-      </CardContent>
-    </Card>
-  );
-}
-
-function countSkills(skills: SkillNode[]): number {
-  let total = 0;
-  for (const skill of skills) {
-    total += 1;
-    if (skill.children && skill.children.length > 0) {
-      total += countSkills(skill.children);
-    }
-  }
-  return total;
-}
-
-function countDecks(skills: SkillNode[]): number {
-  let total = 0;
-  for (const skill of skills) {
-    total += skill.decks?.length ?? 0;
-    if (skill.children && skill.children.length > 0) {
-      total += countDecks(skill.children);
-    }
-  }
-  return total;
-}
-
-function countCards(skills: SkillNode[]): number {
-  let total = 0;
-  for (const skill of skills) {
-    for (const deck of skill.decks ?? []) {
-      total += deck.card_count;
-    }
-    if (skill.children && skill.children.length > 0) {
-      total += countCards(skill.children);
-    }
-  }
-  return total;
 }
