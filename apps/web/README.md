@@ -1,20 +1,18 @@
 # skill-tree web
 
-Next.js + shadcn frontend for `skill-tree`, using Convex as the backend.
+Next.js + shadcn frontend for `skill-tree`, using a Go backend API as the source of truth.
 
 ## Getting Started
 
-1. Start Convex from repo root:
+1. Start the Go API from repo root:
 
 ```bash
-cd apps/convex
-bun run dev
+GOWORK=off go run ./apps/api -addr :8080
 ```
 
-2. Set `CONVEX_URL` for the Next.js server:
+2. Configure API base URL:
 
 ```bash
-cd apps/web
 cp .env.example .env.local
 ```
 
@@ -28,9 +26,13 @@ Open [http://localhost:3000](http://localhost:3000) with your browser to see the
 
 ## Architecture
 
-- Convex functions: `apps/convex/convex/*.ts`
-- Server-side data access: `src/lib/skill-tree-api.ts` (used by server components)
-- Client-side review access: `src/lib/skill-tree-client.ts` (direct Convex queries/mutations)
+- Go API: `apps/api` (`/healthz`, `/v1/context`, `/v1/skills/tree`, `/v1/decks`, `/v1/scenarios`)
+- Next backend routes:
+  - `src/app/api/context/route.ts`
+  - `src/app/api/decks/route.ts`
+  - `src/app/api/decks/[deckId]/cards/route.ts`
+  - `src/app/api/cards/covered/route.ts`
+  - `src/app/api/cards/[cardId]/cover/route.ts`
 - Next UI:
   - `src/app/page.tsx` dashboard
   - `src/app/review/page.tsx` interactive quiz review

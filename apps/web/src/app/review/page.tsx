@@ -76,9 +76,7 @@ export default async function ReviewPage({
     }
   } catch (error) {
     decksError =
-      error instanceof Error
-        ? error.message
-        : "Failed to fetch review data from Convex";
+      error instanceof Error ? error.message : "Failed to fetch review data from Go API";
   }
 
   return (

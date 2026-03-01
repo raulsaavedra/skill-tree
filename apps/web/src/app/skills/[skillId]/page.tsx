@@ -57,9 +57,7 @@ export default async function SkillDetailPage({
     skill = await getSkill(skillID);
   } catch (error) {
     loadError =
-      error instanceof Error
-        ? error.message
-        : "Unable to load skill detail from Convex";
+      error instanceof Error ? error.message : "Unable to load skill detail from Go API";
   }
 
   if (loadError || !skill) {

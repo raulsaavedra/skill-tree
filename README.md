@@ -1,12 +1,12 @@
 # skill-tree
 
-A learning app for tracking skills, quiz decks, and hands-on scenarios with a Convex backend, Next.js web UI, and Bun CLI.
+A unified learning CLI that tracks skills, quiz decks, and hands-on scenarios in one tool.
 
-Main apps:
+This repo now also includes an in-progress web port:
 
-- `apps/convex` — Convex schema + queries/mutations
-- `apps/web` — Next.js + shadcn UI (server routes call Convex)
-- `apps/cli` — Bun CLI that calls Convex directly
+- `apps/api` — Go HTTP API backed by the same SQLite store/domain logic.
+- `apps/cli` — Go CLI entrypoint for local CRUD/import workflows.
+- `apps/web` — Next.js + shadcn frontend (with a Next backend layer) that consumes the Go API.
 
 ## What it does
 
@@ -19,46 +19,48 @@ Main apps:
 ## Quick start
 
 ```
-cd apps/convex
-bun run dev
+./install.sh
+skill-tree --help
 ```
 
-In a second terminal:
+## Web + API (in progress)
+
+Run Go API:
+
+```bash
+GOWORK=off go run ./apps/api -addr :8080
+```
+
+Run Next.js app:
 
 ```bash
 cd apps/web
+cp .env.example .env.local
 npm run dev
-```
-
-In a third terminal (optional CLI):
-
-```bash
-./install.sh
-skill-tree help
-```
-
-## Migrate existing SQLite data to Convex
-
-If you already have `~/.skill-tree/skill-tree.db`, import it:
-
-```bash
-cd apps/convex
-bun run import:sqlite
 ```
 
 ## Stack
 
-- Convex
+- Go, Cobra (CLI)
+- Go `net/http` API server (`apps/api`)
 - Next.js (App Router) + shadcn UI (`apps/web`)
-- Bun CLI (`apps/cli`)
-- SQLite migration script (one-time import into Convex)
+- SQLite via modernc.org/sqlite (pure Go, no CGO)
+- [cli-core](../packages/cli-core) for shared utilities (DB, output, skill install)
 
 ## Data
 
-Runtime data lives in Convex.  
-If you already have local SQLite data at `~/.skill-tree/skill-tree.db`, import it with:
+All data lives in `~/.skill-tree/skill-tree.db`. Import existing quiz decks with:
 
-```bash
-cd apps/convex
-bun run import:sqlite
 ```
+skill-tree import --from-quiz
+```
+
+## Claude integration
+
+This CLI is designed to work with Claude Code as a learning companion. Install the Claude skill to teach Claude how to use it:
+
+```
+skill-tree skill install --link --force
+```
+
+The skill definition lives in `skills/skill-tree/SKILL.md` and instructs Claude on session startup, deck creation, tutoring, and skill level updates.
