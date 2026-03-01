@@ -47,7 +47,7 @@ export default async function Home() {
 
   return (
     <main className="min-h-screen bg-muted/20">
-      <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-6 py-8">
+      <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-6 py-8">
         <header className="space-y-3">
           <div className="flex flex-col gap-2">
             <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
@@ -61,7 +61,7 @@ export default async function Home() {
           </p>
         </header>
 
-        <section className="w-full max-w-3xl">
+        <section className="w-full">
           {context.skills.length === 0 ? (
             <p className="text-sm text-muted-foreground">No skills found yet.</p>
           ) : (

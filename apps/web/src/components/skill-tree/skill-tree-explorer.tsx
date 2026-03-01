@@ -102,7 +102,7 @@ function SkillTreeList({
       className={
         depth === 0
           ? "space-y-5 sm:space-y-6"
-          : "mt-4 space-y-4 border-l border-border/70 pl-2 sm:mt-6 sm:ml-2 sm:space-y-6 sm:border-l-2 sm:border-border/80 sm:pl-11"
+          : "mt-4 space-y-4 border-l border-border/70 pl-3 sm:mt-6 sm:ml-2 sm:space-y-6 sm:border-l-2 sm:border-border/80 sm:pl-11"
       }
     >
       {skills.map((skill) => {
