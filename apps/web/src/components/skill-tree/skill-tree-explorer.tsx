@@ -218,11 +218,6 @@ function SkillTreeList({
 }
 
 function DeckCoverage({ deck }: { deck: DeckSummary }) {
-  const percent =
-    deck.card_count > 0
-      ? Math.round((deck.covered_count / deck.card_count) * 100)
-      : 0;
-
   return (
     <Link
       className="block w-full rounded-lg bg-muted/40 p-3 text-xs transition hover:bg-muted/55"
@@ -234,17 +229,12 @@ function DeckCoverage({ deck }: { deck: DeckSummary }) {
         event.stopPropagation();
       }}
     >
-      <div className="mb-1 flex items-center justify-between gap-2">
+      <div className="flex items-center justify-between gap-2">
         <p className="truncate font-medium">{deck.name}</p>
         <span className="text-muted-foreground">
           {deck.covered_count}/{deck.card_count}
         </span>
       </div>
-      <Progress
-        className="h-1.5 bg-muted/70"
-        indicatorClassName="bg-chart-2/85"
-        value={percent}
-      />
     </Link>
   );
 }
