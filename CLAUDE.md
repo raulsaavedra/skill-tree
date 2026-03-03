@@ -11,7 +11,7 @@
 - `apps/web/src/components/skill-tree/skill-tree-explorer.tsx` — interactive skill tree UI
 - `apps/web/src/components/review/review-session.tsx` — interactive review session UI
 - `apps/web/src/lib/skill-tree-api.ts` — server-side web data access to Go API
-- `skills/skill-tree/SKILL.md` — Claude skill definition (installed to ~/.agents/skills/)
+- `skills/skill-tree/SKILL.md` — Claude skill definition (installed to ~/.claude/skills/)
 - `install.sh` — Builds binary to ~/.local/bin/skill-tree
 
 ## Build & test
