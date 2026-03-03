@@ -2,48 +2,23 @@
 
 A unified learning CLI that tracks skills, quiz decks, and hands-on scenarios in one tool.
 
-This repo now also includes an in-progress web port:
-
-- `apps/api` — Go HTTP API backed by the same SQLite store/domain logic.
-- `apps/cli` — Go CLI entrypoint for local CRUD/import workflows.
-- `apps/web` — Next.js + shadcn frontend (with a Next backend layer) that consumes the Go API.
-
 ## What it does
 
-- **Skill tree** — hierarchical skills with proficiency levels (0-5), browsable in the web app
-- **Quiz decks** — flashcard and multiple-choice review in the web app with markdown-rendered answers
+- **Skill tree** — hierarchical skills with proficiency levels (0-5), navigate and review from an interactive TUI
+- **Quiz decks** — flashcard and multiple-choice review with markdown-rendered answers, mode switching, and pagination
 - **Scenarios** — track hands-on projects linked to skills with status progression (planned → in_progress → completed)
 - **Linking** — decks and scenarios link to skills, so each skill shows its associated learning material
-- **Web review UI** — interactive review mode in Next.js (`/review`) with flashcard/MCQ/auto parity semantics
 
 ## Quick start
 
 ```
 ./install.sh
-skill-tree --help
-```
-
-## Web + API (in progress)
-
-Run Go API:
-
-```bash
-GOWORK=off go run ./apps/api -addr :8080
-```
-
-Run Next.js app:
-
-```bash
-cd apps/web
-cp .env.example .env.local
-npm run dev
+skill-tree
 ```
 
 ## Stack
 
-- Go, Cobra (CLI)
-- Go `net/http` API server (`apps/api`)
-- Next.js (App Router) + shadcn UI (`apps/web`)
+- Go, Cobra (CLI), BubbleTea (TUI), Lipgloss (styling)
 - SQLite via modernc.org/sqlite (pure Go, no CGO)
 - [cli-core](../packages/cli-core) for shared utilities (DB, output, skill install)
 
