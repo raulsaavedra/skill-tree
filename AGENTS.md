@@ -2,7 +2,7 @@
 
 ## Layout
 
-- `apps/cli/main.go` — CLI entry point, all Cobra commands
+- `cmd/skill-tree/main.go` — CLI entry point, all Cobra commands
 - `internal/store/store.go` — SQLite schema, migrations, all CRUD operations
 - `internal/store/store_test.go` — Store tests (run with `go test ./...`)
 - `internal/tui/tree.go` — interactive skill tree + app composition
