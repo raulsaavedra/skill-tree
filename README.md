@@ -1,6 +1,6 @@
 # skill-tree
 
-`skill-tree` is a local-first learning CLI for tracking skills, quiz decks, and hands-on scenarios in one place.
+`skill-tree` is a local-first learning TUI for tracking skills, quiz decks, and hands-on scenarios in one place.
 
 It is designed for interactive learning, with agents using the stored context to tutor, quiz, and guide practice.
 
