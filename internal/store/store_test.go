@@ -2,29 +2,44 @@ package store
 
 import (
 	"database/sql"
+	"fmt"
 	"path/filepath"
 	"reflect"
+	"sync"
 	"testing"
+
+	"github.com/raulsaavedra/cli-core/pkg/sqliteutil"
 
 	_ "modernc.org/sqlite"
 )
 
 func openTempStore(t *testing.T) *Store {
 	t.Helper()
-	dbPath := filepath.Join(t.TempDir(), "skill-tree.db")
-	db, err := sql.Open("sqlite", dbPath)
+	return openTempStoreAtPath(t, filepath.Join(t.TempDir(), "skill-tree.db"))
+}
+
+func openStoreAtPath(dbPath string) (*Store, error) {
+	db, _, err := sqliteutil.OpenSQLite(sqliteutil.OpenOptions{
+		AppName:  "skill-tree-test",
+		Filename: "skill-tree.db",
+		Path:     dbPath,
+		Pragmas:  []string{"foreign_keys = ON"},
+		Migrate:  migrate,
+	})
 	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
+		return nil, err
 	}
-	if _, err := db.Exec("PRAGMA foreign_keys = ON"); err != nil {
-		t.Fatalf("pragma: %v", err)
+	return &Store{DB: db}, nil
+}
+
+func openTempStoreAtPath(t *testing.T, dbPath string) *Store {
+	t.Helper()
+	st, err := openStoreAtPath(dbPath)
+	if err != nil {
+		t.Fatalf("open sqlite store: %v", err)
 	}
-	if err := migrate(db); err != nil {
-		_ = db.Close()
-		t.Fatalf("migrate sqlite: %v", err)
-	}
-	t.Cleanup(func() { db.Close() })
-	return &Store{DB: db}
+	t.Cleanup(func() { st.Close() })
+	return st
 }
 
 // openTempQuizDB creates a minimal quiz-style database with the same schema
@@ -1363,5 +1378,188 @@ func TestResetDeckCoverage(t *testing.T) {
 	}
 	if len(cards) != 2 {
 		t.Fatalf("card count after reset = %d, want 2", len(cards))
+	}
+}
+
+func TestCreateDeckWithContents(t *testing.T) {
+	t.Parallel()
+
+	st := openTempStore(t)
+	skillID, err := st.CreateSkill("Networking", "", nil, 1)
+	if err != nil {
+		t.Fatalf("CreateSkill: %v", err)
+	}
+
+	deckID, err := st.CreateDeckWithContents("Networking Fundamentals", "Core concepts", []int64{skillID}, []Card{
+		{Question: "What is a LAN?", Answer: "A local network", Tags: []string{"networking", "lan"}},
+		{Question: "What is NAT?", Answer: "Address translation", Tags: []string{"networking", "nat"}},
+	})
+	if err != nil {
+		t.Fatalf("CreateDeckWithContents: %v", err)
+	}
+
+	deck, err := st.GetDeckByName("Networking Fundamentals")
+	if err != nil {
+		t.Fatalf("GetDeckByName: %v", err)
+	}
+	if deck.ID != deckID {
+		t.Fatalf("deck id = %d, want %d", deck.ID, deckID)
+	}
+
+	var linkCount int
+	if err := st.DB.QueryRow(`SELECT COUNT(*) FROM deck_skills WHERE deck_id = ? AND skill_id = ?`, deckID, skillID).Scan(&linkCount); err != nil {
+		t.Fatalf("count deck links: %v", err)
+	}
+	if linkCount != 1 {
+		t.Fatalf("deck link count = %d, want 1", linkCount)
+	}
+
+	cards, err := st.ListCards(deckID, 10)
+	if err != nil {
+		t.Fatalf("ListCards: %v", err)
+	}
+	if len(cards) != 2 {
+		t.Fatalf("card count = %d, want 2", len(cards))
+	}
+	if !reflect.DeepEqual(cards[0].Tags, []string{"lan", "networking"}) {
+		t.Fatalf("card 1 tags = %#v, want %#v", cards[0].Tags, []string{"lan", "networking"})
+	}
+}
+
+func TestCreateDeckWithContentsRollbackOnLinkFailure(t *testing.T) {
+	t.Parallel()
+
+	st := openTempStore(t)
+	_, err := st.CreateDeckWithContents("Broken Deck", "should roll back", []int64{9999}, []Card{
+		{Question: "Q1", Answer: "A1"},
+	})
+	if err == nil {
+		t.Fatal("expected CreateDeckWithContents to fail for invalid skill link")
+	}
+
+	decks, err := st.ListDecks()
+	if err != nil {
+		t.Fatalf("ListDecks: %v", err)
+	}
+	if len(decks) != 0 {
+		t.Fatalf("deck count after rollback = %d, want 0", len(decks))
+	}
+
+	var cardCount int
+	if err := st.DB.QueryRow(`SELECT COUNT(*) FROM cards`).Scan(&cardCount); err != nil {
+		t.Fatalf("count cards: %v", err)
+	}
+	if cardCount != 0 {
+		t.Fatalf("card count after rollback = %d, want 0", cardCount)
+	}
+}
+
+func TestParallelCreateSkillWriters(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "parallel-skill-tree.db")
+	initial := openTempStoreAtPath(t, dbPath)
+	if err := initial.Close(); err != nil {
+		t.Fatalf("close initial store: %v", err)
+	}
+
+	const writers = 12
+	start := make(chan struct{})
+	errs := make(chan error, writers)
+	var wg sync.WaitGroup
+
+	for i := 0; i < writers; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			st, err := openStoreAtPath(dbPath)
+			if err != nil {
+				errs <- err
+				return
+			}
+			defer st.Close()
+			<-start
+			_, err = st.CreateSkill(fmt.Sprintf("Skill %02d", i), "", nil, 0)
+			errs <- err
+		}(i)
+	}
+
+	close(start)
+	wg.Wait()
+	close(errs)
+
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("parallel CreateSkill failed: %v", err)
+		}
+	}
+
+	verify := openTempStoreAtPath(t, dbPath)
+	skills, err := verify.ListSkills(nil)
+	if err != nil {
+		t.Fatalf("ListSkills: %v", err)
+	}
+	if len(skills) != writers {
+		t.Fatalf("root skill count = %d, want %d", len(skills), writers)
+	}
+}
+
+func TestParallelInsertCardsWriters(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "parallel-cards.db")
+	st := openTempStoreAtPath(t, dbPath)
+	deckID, err := st.CreateDeck("Shared Deck", "")
+	if err != nil {
+		t.Fatalf("CreateDeck: %v", err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatalf("close seed store: %v", err)
+	}
+
+	const writers = 8
+	const cardsPerWriter = 3
+	start := make(chan struct{})
+	errs := make(chan error, writers)
+	var wg sync.WaitGroup
+
+	for i := 0; i < writers; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			writerStore, err := openStoreAtPath(dbPath)
+			if err != nil {
+				errs <- err
+				return
+			}
+			defer writerStore.Close()
+
+			cards := make([]Card, 0, cardsPerWriter)
+			for j := 0; j < cardsPerWriter; j++ {
+				cards = append(cards, Card{
+					Question: fmt.Sprintf("writer-%02d-card-%02d", i, j),
+					Answer:   "ok",
+					Tags:     []string{"batch", fmt.Sprintf("writer-%02d", i)},
+				})
+			}
+
+			<-start
+			errs <- writerStore.InsertCards(deckID, cards)
+		}(i)
+	}
+
+	close(start)
+	wg.Wait()
+	close(errs)
+
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("parallel InsertCards failed: %v", err)
+		}
+	}
+
+	verify := openTempStoreAtPath(t, dbPath)
+	cards, err := verify.ListCards(deckID, writers*cardsPerWriter+10)
+	if err != nil {
+		t.Fatalf("ListCards: %v", err)
+	}
+	if len(cards) != writers*cardsPerWriter {
+		t.Fatalf("card count = %d, want %d", len(cards), writers*cardsPerWriter)
 	}
 }

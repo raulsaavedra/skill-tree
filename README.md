@@ -1,41 +1,91 @@
 # skill-tree
 
-A unified learning CLI that tracks skills, quiz decks, and hands-on scenarios in one tool.
+`skill-tree` is a local-first learning CLI for tracking skills, quiz decks, and hands-on scenarios in one place.
 
-## What it does
+It is built for people and agents that want a persistent learning system instead of ad-hoc notes and one-off flashcards.
 
-- **Skill tree** — hierarchical skills with proficiency levels (0-5), navigate and review from an interactive TUI
-- **Quiz decks** — flashcard and multiple-choice review with markdown-rendered answers, mode switching, and pagination
-- **Scenarios** — track hands-on projects linked to skills with status progression (planned → in_progress → completed)
-- **Linking** — decks and scenarios link to skills, so each skill shows its associated learning material
+## Features
 
-## Quick start
+- Hierarchical skill tree with proficiency levels from `0` to `5`
+- Quiz decks with flashcard and multiple-choice review
+- Hands-on scenarios linked to skills
+- TUI for browsing the skill tree and reviewing cards
+- Local SQLite storage with no external API dependency
+- Agent-friendly CLI surface for tutoring, planning, and review workflows
 
-```
+## Concepts
+
+- **Skills** represent concepts or domains you are learning.
+- **Decks** hold quiz cards linked to one or more skills.
+- **Scenarios** represent hands-on exercises or projects linked to skills.
+- **Coverage** tracks which cards have been deliberately reviewed.
+
+## Quick Start
+
+Build and install locally:
+
+```bash
 ./install.sh
 skill-tree
 ```
 
-## Stack
+Run a few common commands:
 
-- Go, Cobra (CLI), BubbleTea (TUI), Lipgloss (styling)
-- SQLite via modernc.org/sqlite (pure Go, no CGO)
-- [cli-core](../packages/cli-core) for shared utilities (DB, output, skill install)
-
-## Data
-
-All data lives in `~/.skill-tree/skill-tree.db`. Import existing quiz decks with:
-
+```bash
+skill-tree context --json
+skill-tree skill list --tree
+skill-tree deck list
+skill-tree review
 ```
+
+## Data Storage
+
+By default, `skill-tree` stores data in:
+
+```text
+$HOME/.skill-tree/skill-tree.db
+```
+
+If you already use the older `quiz` CLI, you can import its decks:
+
+```bash
 skill-tree import --from-quiz
 ```
 
-## Claude integration
+## Agent Integration
 
-This CLI is designed to work with Claude Code as a learning companion. Install the Claude skill to teach Claude how to use it:
+This repo includes an agent skill definition at [`skills/skill-tree/SKILL.md`](./skills/skill-tree/SKILL.md).
 
+The skill file is written for general-purpose coding or tutoring agents. It explains:
+
+- how to load learning context at the start of a session
+- how to teach using the existing decks and scenarios
+- how to create or refine cards
+- how to update skill levels as proficiency improves
+
+If your agent platform supports local skill files or reusable task instructions, you can adapt that file directly.
+
+## Development
+
+```bash
+go test ./...
+go build ./...
 ```
-skill-tree skill install --link --force
-```
 
-The skill definition lives in `skills/skill-tree/SKILL.md` and instructs Claude on session startup, deck creation, tutoring, and skill level updates.
+The project uses:
+
+- Go
+- Cobra
+- Bubble Tea
+- Lip Gloss
+- `modernc.org/sqlite`
+
+## Workspace Note
+
+Right now this repository depends on a sibling `cli-core` module via a local `replace` directive in `go.mod`.
+
+That means the easiest way to build it today is inside the same workspace layout used in this repo. If you want to publish it as a fully standalone open-source project, the next step is to remove that local workspace dependency or publish/version `cli-core`.
+
+## License
+
+MIT. See [`LICENSE.md`](./LICENSE.md).

@@ -15,7 +15,7 @@ description: Learning tutor — teaches in-chat using skill-tree to track profic
 ## Important: Command Format
 - **Always use single-line commands** for all skill-tree CLI operations.
 - Do NOT use backslash (`\`) line continuations.
-- This ensures Claude Code permissions work correctly with `Bash(skill-tree:*)` patterns.
+- This keeps command execution reliable across agent tooling and shell integrations.
 
 ## Session Start
 At the start of every learning session, run:
@@ -84,7 +84,7 @@ This returns the full skill tree with levels, linked decks (with card counts), l
 - Add a scenario linked to skills:
   - `skill-tree scenario add --name "Build multi-tier VPC" --description "Hands-on VPC lab" --skill-id 1 --skill-id 2`
 - Add a scenario with a repo path:
-  - `skill-tree scenario add --name "Deploy Go service" --repo "/Users/raulsaavedra/src/vpc-lab"`
+  - `skill-tree scenario add --name "Deploy Go service" --repo "$HOME/src/vpc-lab"`
 - List all scenarios:
   - `skill-tree scenario list`
   - `skill-tree scenario list --json`

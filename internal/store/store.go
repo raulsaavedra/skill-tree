@@ -322,12 +322,17 @@ func (s *Store) getChildSkills(parentID int64) ([]Skill, error) {
 		if pid.Valid {
 			sk.ParentID = &pid.Int64
 		}
-		if err := s.loadSkillLinks(&sk); err != nil {
-			return nil, err
-		}
 		children = append(children, sk)
 	}
-	return children, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for i := range children {
+		if err := s.loadSkillLinks(&children[i]); err != nil {
+			return nil, err
+		}
+	}
+	return children, nil
 }
 
 func (s *Store) loadSkillLinks(sk *Skill) error {
@@ -609,6 +614,34 @@ func (s *Store) CreateDeck(name, description string) (int64, error) {
 	return res.LastInsertId()
 }
 
+func (s *Store) CreateDeckWithContents(name, description string, skillIDs []int64, cards []Card) (int64, error) {
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return 0, fmt.Errorf("create deck begin: %w", err)
+	}
+	defer tx.Rollback()
+
+	deckID, err := createDeckTx(tx, name, description)
+	if err != nil {
+		return 0, err
+	}
+	for _, skillID := range skillIDs {
+		if _, err := tx.Exec(`INSERT OR IGNORE INTO deck_skills(deck_id, skill_id) VALUES(?, ?)`, deckID, skillID); err != nil {
+			return 0, fmt.Errorf("create deck link skill: %w", err)
+		}
+	}
+	for _, card := range cards {
+		if _, err := insertCardTx(tx, deckID, card); err != nil {
+			return 0, err
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("create deck commit: %w", err)
+	}
+	return deckID, nil
+}
+
 func (s *Store) ListDecks() ([]Deck, error) {
 	rows, err := s.DB.Query(`
 		SELECT d.id, d.name, COALESCE(d.description,''),
@@ -748,6 +781,42 @@ func (s *Store) ResetDeckCoverage(deckID int64) error {
 // --- Card CRUD ---
 
 func (s *Store) InsertCard(deckID int64, card Card) (int64, error) {
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return 0, fmt.Errorf("insert card begin: %w", err)
+	}
+	defer tx.Rollback()
+
+	id, err := insertCardTx(tx, deckID, card)
+	if err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("insert card commit: %w", err)
+	}
+	return id, nil
+}
+
+func (s *Store) InsertCards(deckID int64, cards []Card) error {
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return fmt.Errorf("insert cards begin: %w", err)
+	}
+	defer tx.Rollback()
+
+	for _, card := range cards {
+		if _, err := insertCardTx(tx, deckID, card); err != nil {
+			return err
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("insert cards commit: %w", err)
+	}
+	return nil
+}
+
+func insertCardTx(tx *sql.Tx, deckID int64, card Card) (int64, error) {
 	choicesValue := encodeChoices(card.Choices)
 	var extraValue any
 	if card.Extra == "" {
@@ -756,7 +825,7 @@ func (s *Store) InsertCard(deckID int64, card Card) (int64, error) {
 		extraValue = card.Extra
 	}
 
-	res, err := s.DB.Exec(
+	res, err := tx.Exec(
 		`INSERT INTO cards(deck_id, question, answer, extra, choices, correct_index) VALUES(?, ?, ?, ?, ?, ?)`,
 		deckID, card.Question, card.Answer, extraValue, choicesValue, card.CorrectIndex,
 	)
@@ -767,8 +836,8 @@ func (s *Store) InsertCard(deckID int64, card Card) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	for _, tag := range card.Tags {
-		_, _ = s.DB.Exec(`INSERT OR IGNORE INTO card_tags(card_id, tag) VALUES(?, ?)`, id, tag)
+	if err := replaceCardTagsTx(tx, id, card.Tags); err != nil {
+		return 0, err
 	}
 	return id, nil
 }
@@ -789,15 +858,26 @@ func (s *Store) ListCards(deckID int64, limit int) ([]Card, error) {
 	}
 	defer rows.Close()
 	out := []Card{}
+	cardIDs := []int64{}
 	for rows.Next() {
 		card, err := scanCard(rows)
 		if err != nil {
 			return nil, fmt.Errorf("list cards scan: %w", err)
 		}
-		card.Tags, _ = s.tagsForCard(card.ID)
 		out = append(out, card)
+		cardIDs = append(cardIDs, card.ID)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	tagsByCard, err := s.tagsForCards(cardIDs)
+	if err != nil {
+		return nil, err
+	}
+	for i := range out {
+		out[i].Tags = tagsByCard[out[i].ID]
+	}
+	return out, nil
 }
 
 func (s *Store) GetCard(deckID, cardID int64) (*Card, error) {
@@ -815,6 +895,12 @@ func (s *Store) GetCard(deckID, cardID int64) (*Card, error) {
 }
 
 func (s *Store) UpdateCard(deckID, cardID int64, update CardUpdate) error {
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return fmt.Errorf("update card begin: %w", err)
+	}
+	defer tx.Rollback()
+
 	sets := []string{}
 	args := []any{}
 	if update.Question != nil {
@@ -845,7 +931,7 @@ func (s *Store) UpdateCard(deckID, cardID int64, update CardUpdate) error {
 	if len(sets) > 0 {
 		args = append(args, deckID, cardID)
 		query := fmt.Sprintf("UPDATE cards SET %s, updated_at = CURRENT_TIMESTAMP WHERE deck_id = ? AND id = ?", strings.Join(sets, ", "))
-		res, err := s.DB.Exec(query, args...)
+		res, err := tx.Exec(query, args...)
 		if err != nil {
 			return fmt.Errorf("update card: %w", err)
 		}
@@ -857,22 +943,20 @@ func (s *Store) UpdateCard(deckID, cardID int64, update CardUpdate) error {
 			return fmt.Errorf("card %d not found in deck", cardID)
 		}
 	} else if update.Tags != nil {
-		if err := s.ensureCard(deckID, cardID); err != nil {
+		if err := ensureCardTx(tx, deckID, cardID); err != nil {
 			return err
 		}
 	}
 
 	if update.Tags != nil {
-		if _, err := s.DB.Exec(`DELETE FROM card_tags WHERE card_id = ?`, cardID); err != nil {
-			return fmt.Errorf("update card tags delete: %w", err)
-		}
-		for _, tag := range *update.Tags {
-			if _, err := s.DB.Exec(`INSERT INTO card_tags(card_id, tag) VALUES(?, ?)`, cardID, tag); err != nil {
-				return fmt.Errorf("update card tags insert: %w", err)
-			}
+		if err := replaceCardTagsTx(tx, cardID, *update.Tags); err != nil {
+			return err
 		}
 	}
 
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("update card commit: %w", err)
+	}
 	return nil
 }
 
@@ -906,6 +990,39 @@ func (s *Store) tagsForCard(cardID int64) ([]string, error) {
 			return nil, err
 		}
 		out = append(out, tag)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) tagsForCards(cardIDs []int64) (map[int64][]string, error) {
+	if len(cardIDs) == 0 {
+		return map[int64][]string{}, nil
+	}
+
+	placeholders := make([]string, len(cardIDs))
+	args := make([]any, len(cardIDs))
+	for i, cardID := range cardIDs {
+		placeholders[i] = "?"
+		args[i] = cardID
+	}
+
+	rows, err := s.DB.Query(
+		fmt.Sprintf(`SELECT card_id, tag FROM card_tags WHERE card_id IN (%s) ORDER BY card_id, tag`, strings.Join(placeholders, ",")),
+		args...,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := map[int64][]string{}
+	for rows.Next() {
+		var cardID int64
+		var tag string
+		if err := rows.Scan(&cardID, &tag); err != nil {
+			return nil, err
+		}
+		out[cardID] = append(out[cardID], tag)
 	}
 	return out, rows.Err()
 }
@@ -973,6 +1090,42 @@ func (s *Store) ensureCard(deckID, cardID int64) error {
 	return err
 }
 
+func ensureCardTx(tx *sql.Tx, deckID, cardID int64) error {
+	var exists int
+	err := tx.QueryRow(`SELECT 1 FROM cards WHERE deck_id = ? AND id = ?`, deckID, cardID).Scan(&exists)
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("card %d not found in deck", cardID)
+	}
+	return err
+}
+
+func createDeckTx(tx *sql.Tx, name, description string) (int64, error) {
+	res, err := tx.Exec(`INSERT INTO decks(name, description) VALUES(?, ?)`, name, description)
+	if err != nil {
+		return 0, fmt.Errorf("create deck: %w", err)
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return 0, err
+	}
+	return id, nil
+}
+
+func replaceCardTagsTx(tx *sql.Tx, cardID int64, tags []string) error {
+	if _, err := tx.Exec(`DELETE FROM card_tags WHERE card_id = ?`, cardID); err != nil {
+		return fmt.Errorf("replace card tags delete: %w", err)
+	}
+	for _, tag := range tags {
+		if _, err := tx.Exec(`INSERT OR IGNORE INTO card_tags(card_id, tag) VALUES(?, ?)`, cardID, tag); err != nil {
+			return fmt.Errorf("replace card tags insert: %w", err)
+		}
+	}
+	return nil
+}
+
 // --- Scenario CRUD ---
 
 func (s *Store) CreateScenario(name, description, repoPath string, skillIDs []int64) (int64, error) {
@@ -1034,13 +1187,18 @@ func (s *Store) ListScenarios(status string) ([]Scenario, error) {
 		if err := rows.Scan(&sc.ID, &sc.Name, &sc.Description, &sc.RepoPath, &sc.Status, &sc.CreatedAt, &sc.UpdatedAt, &sc.CompletedAt); err != nil {
 			return nil, fmt.Errorf("list scenarios scan: %w", err)
 		}
-		sc.Skills, err = s.skillsForScenario(sc.ID)
+		out = append(out, sc)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for i := range out {
+		out[i].Skills, err = s.skillsForScenario(out[i].ID)
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, sc)
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 func (s *Store) GetScenario(id int64) (*Scenario, error) {
@@ -1258,15 +1416,26 @@ func (s *Store) CardsForSkill(skillID int64, limit int) ([]Card, error) {
 	defer crows.Close()
 
 	out := []Card{}
+	cardIDs := []int64{}
 	for crows.Next() {
 		card, err := scanCard(crows)
 		if err != nil {
 			return nil, err
 		}
-		card.Tags, _ = s.tagsForCard(card.ID)
 		out = append(out, card)
+		cardIDs = append(cardIDs, card.ID)
 	}
-	return out, crows.Err()
+	if err := crows.Err(); err != nil {
+		return nil, err
+	}
+	tagsByCard, err := s.tagsForCards(cardIDs)
+	if err != nil {
+		return nil, err
+	}
+	for i := range out {
+		out[i].Tags = tagsByCard[out[i].ID]
+	}
+	return out, nil
 }
 
 func (s *Store) descendantSkillIDs(parentID int64) ([]int64, error) {
@@ -1333,6 +1502,15 @@ func (s *Store) ImportFromQuiz(quizDBPath string) (int, int, error) {
 		return 0, 0, err
 	}
 
+	existingDeckNames := map[string]bool{}
+	existingDecks, err := s.ListDecks()
+	if err != nil {
+		return 0, 0, fmt.Errorf("import existing decks: %w", err)
+	}
+	for _, deck := range existingDecks {
+		existingDeckNames[deck.Name] = true
+	}
+
 	tx, err := s.DB.Begin()
 	if err != nil {
 		return 0, 0, fmt.Errorf("import begin: %w", err)
@@ -1344,19 +1522,15 @@ func (s *Store) ImportFromQuiz(quizDBPath string) (int, int, error) {
 
 	for _, qd := range quizDecks {
 		// Skip if deck name already exists
-		existing, err := s.GetDeckByName(qd.name)
-		if err == nil && existing != nil {
+		if existingDeckNames[qd.name] {
 			continue
 		}
 
-		res, err := tx.Exec(`INSERT INTO decks(name, description) VALUES(?, ?)`, qd.name, qd.description)
+		newDeckID, err := createDeckTx(tx, qd.name, qd.description)
 		if err != nil {
 			return 0, 0, fmt.Errorf("import create deck %q: %w", qd.name, err)
 		}
-		newDeckID, err := res.LastInsertId()
-		if err != nil {
-			return 0, 0, err
-		}
+		existingDeckNames[qd.name] = true
 		decksImported++
 
 		// Read cards for this deck from quiz DB
@@ -1407,7 +1581,11 @@ func (s *Store) ImportFromQuiz(quizDBPath string) (int, int, error) {
 				for trows.Next() {
 					var tag string
 					if err := trows.Scan(&tag); err == nil {
-						tx.Exec(`INSERT OR IGNORE INTO card_tags(card_id, tag) VALUES(?, ?)`, newCardID, tag)
+						if _, err := tx.Exec(`INSERT OR IGNORE INTO card_tags(card_id, tag) VALUES(?, ?)`, newCardID, tag); err != nil {
+							trows.Close()
+							crows.Close()
+							return 0, 0, fmt.Errorf("import insert tag: %w", err)
+						}
 					}
 				}
 				trows.Close()

@@ -8,7 +8,7 @@
 - `internal/tui/tree.go` — interactive skill tree + app composition
 - `internal/tui/review.go` — review session TUI model
 - `internal/tui/markdown.go` — markdown rendering helpers for TUI
-- `skills/skill-tree/SKILL.md` — Claude skill definition (installed to ~/.agents/skills/)
+- `skills/skill-tree/SKILL.md` — agent skill definition for integrating `skill-tree` into agent workflows
 - `install.sh` — Builds binary to ~/.local/bin/skill-tree
 
 ## Build & test

@@ -526,14 +526,8 @@ func deckCmd() *cobra.Command {
 				if deckName == "" {
 					return fmt.Errorf("--deck-name is required")
 				}
-				deckID, err := st.CreateDeck(deckName, description)
-				if err != nil {
+				if _, err := st.CreateDeckWithContents(deckName, description, skillIDs, nil); err != nil {
 					return err
-				}
-				for _, sid := range skillIDs {
-					if err := st.LinkDeckSkill(deckID, sid); err != nil {
-						return err
-					}
 				}
 				fmt.Printf("Created deck: %s\n", deckName)
 				return nil
@@ -550,23 +544,16 @@ func deckCmd() *cobra.Command {
 			if deckInput.Name == "" {
 				return fmt.Errorf("deck payload requires name")
 			}
-			deckID, err := st.CreateDeck(deckInput.Name, deckInput.Description)
-			if err != nil {
-				return err
-			}
-			for _, sid := range skillIDs {
-				if err := st.LinkDeckSkill(deckID, sid); err != nil {
-					return err
-				}
-			}
+			cards := make([]store.Card, 0, len(deckInput.Cards))
 			for idx, rawCard := range deckInput.Cards {
 				card, err := normalizeCard(rawCard)
 				if err != nil {
 					return fmt.Errorf("card %d: %w", idx+1, err)
 				}
-				if _, err := st.InsertCard(deckID, card); err != nil {
-					return err
-				}
+				cards = append(cards, card)
+			}
+			if _, err := st.CreateDeckWithContents(deckInput.Name, deckInput.Description, skillIDs, cards); err != nil {
+				return err
 			}
 			if len(deckInput.Cards) > 0 {
 				fmt.Printf("Created deck: %s with %d cards\n", deckInput.Name, len(deckInput.Cards))
@@ -813,10 +800,8 @@ func cardCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				for _, card := range cards {
-					if _, err := st.InsertCard(deckID, card); err != nil {
-						return err
-					}
+				if err := st.InsertCards(deckID, cards); err != nil {
+					return err
 				}
 				fmt.Printf("Added %d cards to deck id %d\n", len(cards), deckID)
 				return nil
