@@ -21,8 +21,8 @@ go build ./...        # compile check
 
 ## Dependencies
 
-- Uses `cli-core` from `../packages/cli-core` (local replace in go.mod)
-- Part of the Go workspace at `~/src/go.work`
+- Uses the published `github.com/raulsaavedra/cli-core` Go module
+- Can be built as a standalone repo without a sibling workspace dependency
 
 ## Conventions
 

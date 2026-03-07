@@ -22,7 +22,14 @@ It is built for people and agents that want a persistent learning system instead
 
 ## Quick Start
 
-Build and install locally:
+Install the latest published version:
+
+```bash
+go install github.com/raulsaavedra/skill-tree/cmd/skill-tree@latest
+skill-tree
+```
+
+For local development, build and install from the repo:
 
 ```bash
 ./install.sh
@@ -79,12 +86,6 @@ The project uses:
 - Bubble Tea
 - Lip Gloss
 - `modernc.org/sqlite`
-
-## Workspace Note
-
-Right now this repository depends on a sibling `cli-core` module via a local `replace` directive in `go.mod`.
-
-That means the easiest way to build it today is inside the same workspace layout used in this repo. If you want to publish it as a fully standalone open-source project, the next step is to remove that local workspace dependency or publish/version `cli-core`.
 
 ## License
 

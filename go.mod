@@ -5,7 +5,7 @@ go 1.24.1
 require (
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
-	github.com/raulsaavedra/cli-core v0.0.0
+	github.com/raulsaavedra/cli-core v0.1.0
 	github.com/spf13/cobra v1.9.1
 	modernc.org/sqlite v1.45.0
 )
@@ -39,5 +39,3 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
 )
-
-replace github.com/raulsaavedra/cli-core => ../packages/cli-core
