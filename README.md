@@ -2,7 +2,7 @@
 
 `skill-tree` is a local-first learning CLI for tracking skills, quiz decks, and hands-on scenarios in one place.
 
-It is built for people and agents that want a persistent learning system instead of ad-hoc notes and one-off flashcards.
+It is designed for interactive learning, with agents using the stored context to tutor, quiz, and guide practice.
 
 ## Features
 
@@ -11,7 +11,7 @@ It is built for people and agents that want a persistent learning system instead
 - Hands-on scenarios linked to skills
 - TUI for browsing the skill tree and reviewing cards
 - Local SQLite storage with no external API dependency
-- Agent-friendly CLI surface for tutoring, planning, and review workflows
+- Works well in agent-assisted tutoring, planning, and review workflows
 
 ## Concepts
 
