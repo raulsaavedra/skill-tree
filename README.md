@@ -36,6 +36,18 @@ For local development, build and install from the repo:
 skill-tree
 ```
 
+If you want your agent to reuse the bundled `skill-tree` instructions, install the included skill definition:
+
+```bash
+skill-tree skill install
+```
+
+For local development, `--link` is handy so agent updates track your checked-out repo:
+
+```bash
+skill-tree skill install --link
+```
+
 Run a few common commands:
 
 ```bash
@@ -53,12 +65,6 @@ By default, `skill-tree` stores data in:
 $HOME/.skill-tree/skill-tree.db
 ```
 
-If you already use the older `quiz` CLI, you can import its decks:
-
-```bash
-skill-tree import --from-quiz
-```
-
 ## Agent Integration
 
 This repo includes an agent skill definition at [`skills/skill-tree/SKILL.md`](./skills/skill-tree/SKILL.md).
@@ -70,7 +76,11 @@ The skill file is written for general-purpose coding or tutoring agents. It expl
 - how to create or refine cards
 - how to update skill levels as proficiency improves
 
-If your agent platform supports local skill files or reusable task instructions, you can adapt that file directly.
+The simplest way to install that skill for an agent workflow is:
+
+```bash
+skill-tree skill install
+```
 
 ## Development
 
