@@ -1,86 +1,65 @@
 # skill-tree
 
-`skill-tree` is a local-first learning TUI for tracking skills, quiz decks, and hands-on scenarios in one place.
+`skill-tree` is a local-first learning system for ongoing tutoring and practice with an agent.
 
-It is designed for interactive learning, with agents using the stored context to tutor, quiz, and guide practice.
+A good way to think about it is as a tutoring system. The agent is the tutor. The learner brings the topic, asks questions, and refines their understanding in conversation. The tutor then uses `skill-tree` to keep track of what is being learned, create material to review, assign practice through the TUI, and carry the progress forward across sessions.
 
-## Features
+`skill-tree` keeps track of skills, quiz decks, hands-on scenarios, and proficiency levels. Those are the pieces the agent uses to understand what the learner is working on, and they are also what the learner sees in the TUI when reviewing progress or practicing retrieval.
 
-- Hierarchical skill tree with proficiency levels from `0` to `5`
-- Quiz decks with flashcard and multiple-choice review
-- Hands-on scenarios linked to skills
-- TUI for browsing the skill tree and reviewing cards
-- Local SQLite storage with no external API dependency
-- Works well in agent-assisted tutoring, planning, and review workflows
+## How It Works In Practice
 
-## Concepts
+The normal workflow is a person learning through an agent that uses `skill-tree` behind the scenes.
 
-- **Skills** represent concepts or domains you are learning.
-- **Decks** hold quiz cards linked to one or more skills.
-- **Scenarios** represent hands-on exercises or projects linked to skills.
-- **Coverage** tracks which cards have been deliberately reviewed.
+A typical session looks like this:
 
-## Quick Start
+1. **The learner brings a topic, problem, or goal.** That might be something broad like networking or something narrow like “help me understand NAT and gateways.”
+2. **The agent loads the current learning context.** At the start of the session, the agent reads the skill tree, linked decks, linked scenarios, and active work.
+3. **The agent teaches in conversation.** The learner asks questions, works through examples, and builds understanding through back-and-forth tutoring.
+4. **The agent updates the learning system.** As the session progresses, the agent can create or refine skills, cards, scenarios, and proficiency levels so the important parts carry forward.
+5. **The learner practices in the TUI.** The learner can browse the skill tree, inspect linked decks and scenarios, and review the material through the built-in TUI.
+6. **Later sessions continue from the same foundation.** Because the context is stored locally, the tutoring and practice can pick up where they left off and get sharper over time.
 
-Install the latest published version:
+Each session can extend the ones that came before it.
+
+During that process, the agent is usually the one organizing the skill tree, writing or refining cards, creating scenarios, and updating levels as the learner makes progress. The learner then uses the TUI to exercise on that material, which is why the agent workflow and the TUI belong to the same system rather than being separate features.
+
+## Installation And Setup
+
+Install the latest published version with:
 
 ```bash
 go install github.com/raulsaavedra/skill-tree/cmd/skill-tree@latest
-skill-tree
 ```
 
-For local development, build and install from the repo:
+For local development, build and install from the repo with:
 
 ```bash
 ./install.sh
-skill-tree
 ```
 
-If you want your agent to reuse the bundled `skill-tree` instructions, install the included skill definition:
+Then install the bundled `skill-tree` skill so your agent can use the stored data as tutoring context:
 
 ```bash
 skill-tree skill install
 ```
 
-For local development, `--link` is handy so agent updates track your checked-out repo:
+Use `--link` to install the skill as a link to the source directory:
 
 ```bash
 skill-tree skill install --link
 ```
 
-Run a few common commands:
+The skill definition lives at [`skills/skill-tree/SKILL.md`](./skills/skill-tree/SKILL.md).
 
-```bash
-skill-tree context --json
-skill-tree skill list --tree
-skill-tree deck list
-skill-tree review
-```
+## Data
 
-## Data Storage
-
-By default, `skill-tree` stores data in:
+`skill-tree` stores its data locally in:
 
 ```text
 $HOME/.skill-tree/skill-tree.db
 ```
 
-## Agent Integration
-
-This repo includes an agent skill definition at [`skills/skill-tree/SKILL.md`](./skills/skill-tree/SKILL.md).
-
-The skill file is written for general-purpose coding or tutoring agents. It explains:
-
-- how to load learning context at the start of a session
-- how to teach using the existing decks and scenarios
-- how to create or refine cards
-- how to update skill levels as proficiency improves
-
-The simplest way to install that skill for an agent workflow is:
-
-```bash
-skill-tree skill install
-```
+The core workflow runs entirely on local data.
 
 ## Development
 
@@ -89,13 +68,7 @@ go test ./...
 go build ./...
 ```
 
-The project uses:
-
-- Go
-- Cobra
-- Bubble Tea
-- Lip Gloss
-- `modernc.org/sqlite`
+The project uses Go, Cobra, Bubble Tea, Lip Gloss, and SQLite via `modernc.org/sqlite`.
 
 ## License
 
