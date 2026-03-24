@@ -84,7 +84,7 @@ This returns the full skill tree with levels, linked decks (with card counts), l
 - Add a scenario linked to skills:
   - `skill-tree scenario add --name "Build multi-tier VPC" --description "Hands-on VPC lab" --skill-id 1 --skill-id 2`
 - Add a scenario with a repo path:
-  - `skill-tree scenario add --name "Deploy Go service" --repo "$HOME/src/vpc-lab"`
+  - `skill-tree scenario add --name "Deploy TS service" --repo "$HOME/src/vpc-lab"`
 - List all scenarios:
   - `skill-tree scenario list`
   - `skill-tree scenario list --json`
