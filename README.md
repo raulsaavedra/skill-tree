@@ -12,7 +12,7 @@ The normal workflow is a person learning through an agent that uses `skill-tree`
 
 A typical session looks like this:
 
-1. **The learner brings a topic, problem, or goal.** That might be something broad like networking or something narrow like “help me understand NAT and gateways.”
+1. **The learner brings a topic, problem, or goal.** That might be something broad like networking or something narrow like "help me understand NAT and gateways."
 2. **The agent loads the current learning context.** At the start of the session, the agent reads the skill tree, linked decks, linked scenarios, and active work.
 3. **The agent teaches in conversation.** The learner asks questions, works through examples, and builds understanding through back-and-forth tutoring.
 4. **The agent updates the learning system.** As the session progresses, the agent can create or refine skills, cards, scenarios, and proficiency levels so the important parts carry forward.
@@ -23,18 +23,21 @@ Each session can extend the ones that came before it.
 
 During that process, the agent is usually the one organizing the skill tree, writing or refining cards, creating scenarios, and updating levels as the learner makes progress. The learner then uses the TUI to exercise on that material, which is why the agent workflow and the TUI belong to the same system rather than being separate features.
 
-## Installation And Setup
+## Installation
 
-Install the latest published version with:
+For local development, build and install from the repo:
 
 ```bash
-go install github.com/raulsaavedra/skill-tree/cmd/skill-tree@latest
+bun install
+./install.sh
 ```
 
-For local development, build and install from the repo with:
+This compiles a standalone binary to `~/.local/bin/skill-tree` using `bun build --compile`.
+
+To run directly without compiling:
 
 ```bash
-./install.sh
+bun src/cli.ts --help
 ```
 
 Then install the bundled `skill-tree` skill so your agent can use the stored data as tutoring context:
@@ -43,7 +46,7 @@ Then install the bundled `skill-tree` skill so your agent can use the stored dat
 skill-tree skill install
 ```
 
-Use `--link` to install the skill as a link to the source directory:
+Use `--link` to install the skill as a symlink to the source directory:
 
 ```bash
 skill-tree skill install --link
@@ -64,11 +67,14 @@ The core workflow runs entirely on local data.
 ## Development
 
 ```bash
-go test ./...
-go build ./...
+bun install          # install dependencies
+bun src/cli.ts       # run the CLI directly
+bun test             # run tests
+bun run typecheck    # type-check without emitting
+./install.sh         # compile standalone binary
 ```
 
-The project uses Go, Cobra, Bubble Tea, Lip Gloss, and SQLite via `modernc.org/sqlite`.
+The project uses TypeScript on Bun, with Commander for the CLI, Ink (React) for the interactive TUI, and bun:sqlite for storage.
 
 ## License
 
