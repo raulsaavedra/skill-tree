@@ -1,0 +1,1530 @@
+use std::collections::{HashMap, HashSet};
+use std::fs;
+use std::path::PathBuf;
+
+use cli_core::{open_sqlite, OpenOptions};
+use rusqlite::{params, Connection};
+use serde::Serialize;
+
+// --- Types ---
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Skill {
+    pub id: i64,
+    pub parent_id: Option<i64>,
+    pub name: String,
+    pub description: String,
+    pub level: i64,
+    pub children: Vec<Skill>,
+    pub decks: Vec<Deck>,
+    pub scenarios: Vec<Scenario>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Scenario {
+    pub id: i64,
+    pub name: String,
+    pub description: String,
+    pub repo_path: String,
+    pub status: String,
+    pub skills: Vec<Skill>,
+    pub created_at: String,
+    pub updated_at: String,
+    pub completed_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Deck {
+    pub id: i64,
+    pub name: String,
+    pub description: String,
+    pub card_count: i64,
+    pub covered_count: i64,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Card {
+    pub id: i64,
+    pub deck_id: i64,
+    pub question: String,
+    pub answer: String,
+    pub extra: String,
+    pub choices: Vec<String>,
+    pub correct_index: Option<i64>,
+    pub tags: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Context {
+    pub skills: Vec<Skill>,
+    pub active_scenarios: Vec<Scenario>,
+}
+
+// --- Validation ---
+
+pub fn validate_level(level: i64) -> Result<(), String> {
+    if level < 0 || level > 5 {
+        Err(format!("level must be 0-5, got {level}"))
+    } else {
+        Ok(())
+    }
+}
+
+const VALID_STATUSES: &[&str] = &["planned", "in_progress", "completed", "abandoned"];
+
+pub fn validate_status(status: &str) -> Result<(), String> {
+    if VALID_STATUSES.contains(&status) {
+        Ok(())
+    } else {
+        Err(format!(
+            "status must be one of: planned, in_progress, completed, abandoned; got \"{status}\""
+        ))
+    }
+}
+
+// --- Choice encoding ---
+
+const CHOICE_SEPARATOR: &str = "|␟|";
+
+fn encode_choices(choices: &[String]) -> Option<String> {
+    if choices.is_empty() {
+        None
+    } else {
+        Some(choices.join(CHOICE_SEPARATOR))
+    }
+}
+
+fn decode_choices(raw: Option<&str>) -> Vec<String> {
+    match raw {
+        None => vec![],
+        Some(s) if s.is_empty() => vec![],
+        Some(s) => {
+            let trimmed = s.trim();
+            if trimmed.starts_with('[') {
+                if let Ok(parsed) = serde_json::from_str::<Vec<String>>(s) {
+                    return parsed;
+                }
+            }
+            s.split(CHOICE_SEPARATOR).map(|p| p.to_string()).collect()
+        }
+    }
+}
+
+// --- Migration ---
+
+fn migrate_old_data_dir() {
+    let home = match dirs::home_dir() {
+        Some(h) => h,
+        None => return,
+    };
+    let old_dir = home.join(".skill-builder");
+    let new_dir = home.join(".skill-tree");
+
+    if new_dir.exists() {
+        return;
+    }
+    if !old_dir.exists() {
+        return;
+    }
+
+    let old_db = old_dir.join("skill-builder.db");
+    let new_db = old_dir.join("skill-tree.db");
+    if old_db.exists() {
+        let _ = fs::rename(&old_db, &new_db);
+    }
+    let _ = fs::rename(&old_dir, &new_dir);
+}
+
+fn migrate(db: &Connection) -> Result<(), String> {
+    let stmts = [
+        "CREATE TABLE IF NOT EXISTS skills (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            parent_id   INTEGER REFERENCES skills(id) ON DELETE CASCADE,
+            name        TEXT NOT NULL,
+            description TEXT,
+            level       INTEGER NOT NULL DEFAULT 0,
+            created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+        )",
+        "CREATE TABLE IF NOT EXISTS decks (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            name        TEXT NOT NULL UNIQUE,
+            description TEXT,
+            created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+        )",
+        "CREATE TABLE IF NOT EXISTS cards (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            deck_id       INTEGER NOT NULL,
+            question      TEXT NOT NULL,
+            answer        TEXT NOT NULL,
+            extra         TEXT,
+            choices       TEXT,
+            correct_index INTEGER,
+            created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(deck_id) REFERENCES decks(id) ON DELETE CASCADE
+        )",
+        "CREATE TABLE IF NOT EXISTS card_tags (
+            card_id INTEGER NOT NULL,
+            tag     TEXT NOT NULL,
+            PRIMARY KEY(card_id, tag),
+            FOREIGN KEY(card_id) REFERENCES cards(id) ON DELETE CASCADE
+        )",
+        "CREATE TABLE IF NOT EXISTS scenarios (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            name         TEXT NOT NULL,
+            description  TEXT,
+            repo_path    TEXT,
+            status       TEXT NOT NULL DEFAULT 'planned',
+            created_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
+            completed_at DATETIME
+        )",
+        "CREATE TABLE IF NOT EXISTS scenario_skills (
+            scenario_id INTEGER NOT NULL REFERENCES scenarios(id) ON DELETE CASCADE,
+            skill_id    INTEGER NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
+            PRIMARY KEY (scenario_id, skill_id)
+        )",
+        "CREATE TABLE IF NOT EXISTS deck_skills (
+            deck_id  INTEGER NOT NULL REFERENCES decks(id) ON DELETE CASCADE,
+            skill_id INTEGER NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
+            PRIMARY KEY (deck_id, skill_id)
+        )",
+        "CREATE TABLE IF NOT EXISTS card_coverage (
+            card_id    INTEGER PRIMARY KEY REFERENCES cards(id) ON DELETE CASCADE,
+            covered_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )",
+        "CREATE TRIGGER IF NOT EXISTS cards_updated_at AFTER UPDATE ON cards
+        BEGIN
+            UPDATE decks SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.deck_id;
+        END",
+        "CREATE TRIGGER IF NOT EXISTS cards_inserted_at AFTER INSERT ON cards
+        BEGIN
+            UPDATE decks SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.deck_id;
+        END",
+        "CREATE TRIGGER IF NOT EXISTS skills_updated_at AFTER UPDATE ON skills
+        FOR EACH ROW BEGIN
+            UPDATE skills SET updated_at = CURRENT_TIMESTAMP WHERE id = OLD.id;
+        END",
+        "CREATE TRIGGER IF NOT EXISTS scenarios_updated_at AFTER UPDATE ON scenarios
+        FOR EACH ROW BEGIN
+            UPDATE scenarios SET updated_at = CURRENT_TIMESTAMP WHERE id = OLD.id;
+        END",
+    ];
+    for stmt in &stmts {
+        db.execute_batch(stmt)
+            .map_err(|e| format!("migration error: {e}"))?;
+    }
+    Ok(())
+}
+
+// --- Store ---
+
+pub struct Store {
+    pub db: Connection,
+    #[allow(dead_code)]
+    pub path: PathBuf,
+}
+
+impl Store {
+    pub fn open() -> Result<Store, String> {
+        migrate_old_data_dir();
+        let (db, path) = open_sqlite(&OpenOptions {
+            app_name: "skill-tree".into(),
+            filename: "skill-tree.db".into(),
+            path: None,
+            pragmas: vec!["foreign_keys = ON".into()],
+            migrate: Some(migrate),
+        })?;
+        Ok(Store { db, path })
+    }
+
+    // --- Skill CRUD ---
+
+    pub fn create_skill(
+        &self,
+        name: &str,
+        description: &str,
+        parent_id: Option<i64>,
+        level: i64,
+    ) -> Result<i64, String> {
+        let desc = if description.is_empty() {
+            None
+        } else {
+            Some(description)
+        };
+        self.db
+            .execute(
+                "INSERT INTO skills(name, description, parent_id, level) VALUES(?1, ?2, ?3, ?4)",
+                params![name, desc, parent_id, level],
+            )
+            .map_err(|e| e.to_string())?;
+        Ok(self.db.last_insert_rowid())
+    }
+
+    pub fn list_skills(&self, parent_id: Option<i64>) -> Result<Vec<Skill>, String> {
+        let (query, rows) = match parent_id {
+            None => {
+                let mut stmt = self
+                    .db
+                    .prepare(
+                        "SELECT id, parent_id, name, COALESCE(description,'') as description, level, created_at, updated_at
+                         FROM skills WHERE parent_id IS NULL ORDER BY name ASC",
+                    )
+                    .map_err(|e| e.to_string())?;
+                let rows: Vec<Skill> = stmt
+                    .query_map([], |row| {
+                        Ok(Skill {
+                            id: row.get(0)?,
+                            parent_id: row.get(1)?,
+                            name: row.get(2)?,
+                            description: row.get(3)?,
+                            level: row.get(4)?,
+                            children: vec![],
+                            decks: vec![],
+                            scenarios: vec![],
+                            created_at: row.get(5)?,
+                            updated_at: row.get(6)?,
+                        })
+                    })
+                    .map_err(|e| e.to_string())?
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|e| e.to_string())?;
+                (String::new(), rows)
+            }
+            Some(pid) => {
+                let mut stmt = self
+                    .db
+                    .prepare(
+                        "SELECT id, parent_id, name, COALESCE(description,'') as description, level, created_at, updated_at
+                         FROM skills WHERE parent_id = ?1 ORDER BY name ASC",
+                    )
+                    .map_err(|e| e.to_string())?;
+                let rows: Vec<Skill> = stmt
+                    .query_map(params![pid], |row| {
+                        Ok(Skill {
+                            id: row.get(0)?,
+                            parent_id: row.get(1)?,
+                            name: row.get(2)?,
+                            description: row.get(3)?,
+                            level: row.get(4)?,
+                            children: vec![],
+                            decks: vec![],
+                            scenarios: vec![],
+                            created_at: row.get(5)?,
+                            updated_at: row.get(6)?,
+                        })
+                    })
+                    .map_err(|e| e.to_string())?
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|e| e.to_string())?;
+                (String::new(), rows)
+            }
+        };
+        let _ = query;
+        Ok(rows)
+    }
+
+    pub fn get_skill(&self, id: i64) -> Result<Skill, String> {
+        let mut stmt = self
+            .db
+            .prepare(
+                "SELECT id, parent_id, name, COALESCE(description,'') as description, level, created_at, updated_at
+                 FROM skills WHERE id = ?1",
+            )
+            .map_err(|e| e.to_string())?;
+        let mut skill: Skill = stmt
+            .query_row(params![id], |row| {
+                Ok(Skill {
+                    id: row.get(0)?,
+                    parent_id: row.get(1)?,
+                    name: row.get(2)?,
+                    description: row.get(3)?,
+                    level: row.get(4)?,
+                    children: vec![],
+                    decks: vec![],
+                    scenarios: vec![],
+                    created_at: row.get(5)?,
+                    updated_at: row.get(6)?,
+                })
+            })
+            .map_err(|_| format!("skill {id} not found"))?;
+        self.load_skill_links(&mut skill)?;
+        skill.children = self.get_child_skills(id)?;
+        Ok(skill)
+    }
+
+    fn get_child_skills(&self, parent_id: i64) -> Result<Vec<Skill>, String> {
+        let mut stmt = self
+            .db
+            .prepare(
+                "SELECT id, parent_id, name, COALESCE(description,'') as description, level, created_at, updated_at
+                 FROM skills WHERE parent_id = ?1 ORDER BY name ASC",
+            )
+            .map_err(|e| e.to_string())?;
+        let mut children: Vec<Skill> = stmt
+            .query_map(params![parent_id], |row| {
+                Ok(Skill {
+                    id: row.get(0)?,
+                    parent_id: row.get(1)?,
+                    name: row.get(2)?,
+                    description: row.get(3)?,
+                    level: row.get(4)?,
+                    children: vec![],
+                    decks: vec![],
+                    scenarios: vec![],
+                    created_at: row.get(5)?,
+                    updated_at: row.get(6)?,
+                })
+            })
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+        for child in &mut children {
+            self.load_skill_links(child)?;
+        }
+        Ok(children)
+    }
+
+    fn load_skill_links(&self, skill: &mut Skill) -> Result<(), String> {
+        // Linked decks
+        let mut dstmt = self
+            .db
+            .prepare(
+                "SELECT d.id, d.name, COALESCE(d.description,'') as description, COUNT(c.id) as card_count, COUNT(cc.card_id) as covered_count, d.updated_at
+                 FROM deck_skills ds
+                 JOIN decks d ON d.id = ds.deck_id
+                 LEFT JOIN cards c ON c.deck_id = d.id
+                 LEFT JOIN card_coverage cc ON cc.card_id = c.id
+                 WHERE ds.skill_id = ?1
+                 GROUP BY d.id
+                 ORDER BY d.name",
+            )
+            .map_err(|e| e.to_string())?;
+        skill.decks = dstmt
+            .query_map(params![skill.id], |row| {
+                Ok(Deck {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    description: row.get(2)?,
+                    card_count: row.get(3)?,
+                    covered_count: row.get(4)?,
+                    updated_at: row.get::<_, String>(5)?,
+                })
+            })
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+
+        // Linked scenarios
+        let mut sstmt = self
+            .db
+            .prepare(
+                "SELECT sc.id, sc.name, COALESCE(sc.description,'') as description, COALESCE(sc.repo_path,'') as repo_path,
+                        sc.status, sc.created_at, sc.updated_at, COALESCE(sc.completed_at,'') as completed_at
+                 FROM scenario_skills ss
+                 JOIN scenarios sc ON sc.id = ss.scenario_id
+                 WHERE ss.skill_id = ?1
+                 ORDER BY sc.name",
+            )
+            .map_err(|e| e.to_string())?;
+        skill.scenarios = sstmt
+            .query_map(params![skill.id], |row| {
+                Ok(Scenario {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    description: row.get(2)?,
+                    repo_path: row.get(3)?,
+                    status: row.get(4)?,
+                    skills: vec![],
+                    created_at: row.get(5)?,
+                    updated_at: row.get(6)?,
+                    completed_at: row.get(7)?,
+                })
+            })
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+
+        Ok(())
+    }
+
+    pub fn update_skill(
+        &self,
+        id: i64,
+        name: Option<&str>,
+        description: Option<&str>,
+        level: Option<i64>,
+    ) -> Result<(), String> {
+        let mut sets = Vec::new();
+        let mut args: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+        if let Some(n) = name {
+            sets.push("name = ?");
+            args.push(Box::new(n.to_string()));
+        }
+        if let Some(d) = description {
+            sets.push("description = ?");
+            let val: Option<String> = if d.is_empty() { None } else { Some(d.to_string()) };
+            args.push(Box::new(val));
+        }
+        if let Some(l) = level {
+            sets.push("level = ?");
+            args.push(Box::new(l));
+        }
+        if sets.is_empty() {
+            return Ok(());
+        }
+        args.push(Box::new(id));
+        let query = format!("UPDATE skills SET {} WHERE id = ?", sets.join(", "));
+        let params: Vec<&dyn rusqlite::types::ToSql> = args.iter().map(|a| a.as_ref()).collect();
+        let changes = self
+            .db
+            .execute(&query, params.as_slice())
+            .map_err(|e| e.to_string())?;
+        if changes == 0 {
+            return Err(format!("skill {id} not found"));
+        }
+        Ok(())
+    }
+
+    pub fn delete_skill(&self, id: i64) -> Result<(), String> {
+        let changes = self
+            .db
+            .execute("DELETE FROM skills WHERE id = ?1", params![id])
+            .map_err(|e| e.to_string())?;
+        if changes == 0 {
+            return Err(format!("skill {id} not found"));
+        }
+        Ok(())
+    }
+
+    pub fn skill_tree(&self) -> Result<Vec<Skill>, String> {
+        let mut stmt = self
+            .db
+            .prepare(
+                "SELECT id, parent_id, name, COALESCE(description,'') as description, level, created_at, updated_at
+                 FROM skills ORDER BY name ASC",
+            )
+            .map_err(|e| e.to_string())?;
+        let all: Vec<Skill> = stmt
+            .query_map([], |row| {
+                Ok(Skill {
+                    id: row.get(0)?,
+                    parent_id: row.get(1)?,
+                    name: row.get(2)?,
+                    description: row.get(3)?,
+                    level: row.get(4)?,
+                    children: vec![],
+                    decks: vec![],
+                    scenarios: vec![],
+                    created_at: row.get(5)?,
+                    updated_at: row.get(6)?,
+                })
+            })
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+        Ok(build_tree(all))
+    }
+
+    pub fn full_context(&self) -> Result<Context, String> {
+        let tree = self.skill_tree()?;
+
+        // Load deck links: skill_id -> Vec<Deck>
+        let mut deck_links: HashMap<i64, Vec<Deck>> = HashMap::new();
+        {
+            let mut stmt = self
+                .db
+                .prepare(
+                    "SELECT ds.skill_id, d.id, d.name, COALESCE(d.description,'') as description, COUNT(c.id) as card_count, COUNT(cc.card_id) as covered_count, d.updated_at
+                     FROM deck_skills ds
+                     JOIN decks d ON d.id = ds.deck_id
+                     LEFT JOIN cards c ON c.deck_id = d.id
+                     LEFT JOIN card_coverage cc ON cc.card_id = c.id
+                     GROUP BY ds.skill_id, d.id
+                     ORDER BY d.name",
+                )
+                .map_err(|e| e.to_string())?;
+            let rows = stmt
+                .query_map([], |row| {
+                    Ok((
+                        row.get::<_, i64>(0)?,
+                        Deck {
+                            id: row.get(1)?,
+                            name: row.get(2)?,
+                            description: row.get(3)?,
+                            card_count: row.get(4)?,
+                            covered_count: row.get(5)?,
+                            updated_at: row.get(6)?,
+                        },
+                    ))
+                })
+                .map_err(|e| e.to_string())?;
+            for r in rows {
+                let (skill_id, deck) = r.map_err(|e| e.to_string())?;
+                deck_links.entry(skill_id).or_default().push(deck);
+            }
+        }
+
+        // Load scenario links: skill_id -> Vec<Scenario>
+        let mut scenario_links: HashMap<i64, Vec<Scenario>> = HashMap::new();
+        {
+            let mut stmt = self
+                .db
+                .prepare(
+                    "SELECT ss.skill_id, sc.id, sc.name, COALESCE(sc.description,'') as description, COALESCE(sc.repo_path,'') as repo_path,
+                            sc.status, sc.created_at, sc.updated_at, COALESCE(sc.completed_at,'') as completed_at
+                     FROM scenario_skills ss
+                     JOIN scenarios sc ON sc.id = ss.scenario_id
+                     ORDER BY sc.name",
+                )
+                .map_err(|e| e.to_string())?;
+            let rows = stmt
+                .query_map([], |row| {
+                    Ok((
+                        row.get::<_, i64>(0)?,
+                        Scenario {
+                            id: row.get(1)?,
+                            name: row.get(2)?,
+                            description: row.get(3)?,
+                            repo_path: row.get(4)?,
+                            status: row.get(5)?,
+                            skills: vec![],
+                            created_at: row.get(6)?,
+                            updated_at: row.get(7)?,
+                            completed_at: row.get(8)?,
+                        },
+                    ))
+                })
+                .map_err(|e| e.to_string())?;
+            for r in rows {
+                let (skill_id, scenario) = r.map_err(|e| e.to_string())?;
+                scenario_links.entry(skill_id).or_default().push(scenario);
+            }
+        }
+
+        // Attach links to tree
+        fn attach_links(
+            skills: &mut [Skill],
+            deck_links: &HashMap<i64, Vec<Deck>>,
+            scenario_links: &HashMap<i64, Vec<Scenario>>,
+        ) {
+            for skill in skills.iter_mut() {
+                if let Some(decks) = deck_links.get(&skill.id) {
+                    skill.decks = decks.clone();
+                }
+                if let Some(scenarios) = scenario_links.get(&skill.id) {
+                    skill.scenarios = scenarios.clone();
+                }
+                attach_links(&mut skill.children, deck_links, scenario_links);
+            }
+        }
+        let mut tree = tree;
+        attach_links(&mut tree, &deck_links, &scenario_links);
+
+        // Active scenarios
+        let mut stmt = self
+            .db
+            .prepare(
+                "SELECT id, name, COALESCE(description,'') as description, COALESCE(repo_path,'') as repo_path,
+                        status, created_at, updated_at, COALESCE(completed_at,'') as completed_at
+                 FROM scenarios
+                 WHERE status IN ('planned', 'in_progress')
+                 ORDER BY status DESC, name ASC",
+            )
+            .map_err(|e| e.to_string())?;
+        let active: Vec<Scenario> = stmt
+            .query_map([], |row| {
+                Ok(Scenario {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    description: row.get(2)?,
+                    repo_path: row.get(3)?,
+                    status: row.get(4)?,
+                    skills: vec![],
+                    created_at: row.get(5)?,
+                    updated_at: row.get(6)?,
+                    completed_at: row.get(7)?,
+                })
+            })
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+
+        Ok(Context {
+            skills: tree,
+            active_scenarios: active,
+        })
+    }
+
+    // --- Deck CRUD ---
+
+    pub fn create_deck_with_contents(
+        &self,
+        name: &str,
+        description: &str,
+        skill_ids: &[i64],
+        cards: &[Card],
+    ) -> Result<i64, String> {
+        let deck_id: i64 = {
+            self.db
+                .execute(
+                    "INSERT INTO decks(name, description) VALUES(?1, ?2)",
+                    params![name, description],
+                )
+                .map_err(|e| e.to_string())?;
+            self.db.last_insert_rowid()
+        };
+        for &sid in skill_ids {
+            self.db
+                .execute(
+                    "INSERT OR IGNORE INTO deck_skills(deck_id, skill_id) VALUES(?1, ?2)",
+                    params![deck_id, sid],
+                )
+                .map_err(|e| e.to_string())?;
+        }
+        for card in cards {
+            self.insert_card_inner(deck_id, card)?;
+        }
+        Ok(deck_id)
+    }
+
+    pub fn list_decks(&self) -> Result<Vec<Deck>, String> {
+        let mut stmt = self
+            .db
+            .prepare(
+                "SELECT d.id, d.name, COALESCE(d.description,'') as description,
+                        COUNT(c.id) AS card_count, COUNT(cc.card_id) AS covered_count, d.updated_at
+                 FROM decks d
+                 LEFT JOIN cards c ON c.deck_id = d.id
+                 LEFT JOIN card_coverage cc ON cc.card_id = c.id
+                 GROUP BY d.id
+                 ORDER BY d.name ASC",
+            )
+            .map_err(|e| e.to_string())?;
+        let decks = stmt
+            .query_map([], |row| {
+                Ok(Deck {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    description: row.get(2)?,
+                    card_count: row.get(3)?,
+                    covered_count: row.get(4)?,
+                    updated_at: row.get(5)?,
+                })
+            })
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+        Ok(decks)
+    }
+
+    pub fn get_deck_by_name(&self, name: &str) -> Result<Deck, String> {
+        let mut stmt = self
+            .db
+            .prepare(
+                "SELECT d.id, d.name, COALESCE(d.description,'') as description,
+                        COUNT(c.id) AS card_count, COUNT(cc.card_id) AS covered_count, d.updated_at
+                 FROM decks d
+                 LEFT JOIN cards c ON c.deck_id = d.id
+                 LEFT JOIN card_coverage cc ON cc.card_id = c.id
+                 WHERE d.name = ?1
+                 GROUP BY d.id",
+            )
+            .map_err(|e| e.to_string())?;
+        stmt.query_row(params![name], |row| {
+            Ok(Deck {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                description: row.get(2)?,
+                card_count: row.get(3)?,
+                covered_count: row.get(4)?,
+                updated_at: row.get(5)?,
+            })
+        })
+        .map_err(|_| format!("deck \"{name}\" not found"))
+    }
+
+    pub fn delete_deck_by_id(&self, id: i64) -> Result<(), String> {
+        let changes = self
+            .db
+            .execute("DELETE FROM decks WHERE id = ?1", params![id])
+            .map_err(|e| e.to_string())?;
+        if changes == 0 {
+            return Err(format!("deck {id} not found"));
+        }
+        Ok(())
+    }
+
+    // --- Coverage ---
+
+    pub fn mark_card_covered(&self, card_id: i64) -> Result<(), String> {
+        self.db
+            .execute(
+                "INSERT OR IGNORE INTO card_coverage(card_id) VALUES(?1)",
+                params![card_id],
+            )
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    pub fn covered_card_ids(&self, card_ids: &[i64]) -> Result<HashSet<i64>, String> {
+        if card_ids.is_empty() {
+            return Ok(HashSet::new());
+        }
+        let placeholders: Vec<String> = (1..=card_ids.len()).map(|i| format!("?{i}")).collect();
+        let query = format!(
+            "SELECT card_id FROM card_coverage WHERE card_id IN ({})",
+            placeholders.join(",")
+        );
+        let mut stmt = self.db.prepare(&query).map_err(|e| e.to_string())?;
+        let params: Vec<&dyn rusqlite::types::ToSql> =
+            card_ids.iter().map(|id| id as &dyn rusqlite::types::ToSql).collect();
+        let rows = stmt
+            .query_map(params.as_slice(), |row| row.get::<_, i64>(0))
+            .map_err(|e| e.to_string())?;
+        let mut set = HashSet::new();
+        for r in rows {
+            set.insert(r.map_err(|e| e.to_string())?);
+        }
+        Ok(set)
+    }
+
+    pub fn complete_deck_coverage(&self, deck_id: i64) -> Result<(), String> {
+        self.db
+            .execute(
+                "INSERT OR IGNORE INTO card_coverage(card_id)
+                 SELECT id FROM cards WHERE deck_id = ?1",
+                params![deck_id],
+            )
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    pub fn reset_deck_coverage(&self, deck_id: i64) -> Result<(), String> {
+        self.db
+            .execute(
+                "DELETE FROM card_coverage
+                 WHERE card_id IN (SELECT id FROM cards WHERE deck_id = ?1)",
+                params![deck_id],
+            )
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    // --- Card CRUD ---
+
+    pub fn insert_card(&self, deck_id: i64, card: &Card) -> Result<i64, String> {
+        self.insert_card_inner(deck_id, card)
+    }
+
+    pub fn insert_cards(&self, deck_id: i64, cards: &[Card]) -> Result<(), String> {
+        for card in cards {
+            self.insert_card_inner(deck_id, card)?;
+        }
+        Ok(())
+    }
+
+    fn insert_card_inner(&self, deck_id: i64, card: &Card) -> Result<i64, String> {
+        let choices_value = encode_choices(&card.choices);
+        let extra_value: Option<&str> = if card.extra.is_empty() {
+            None
+        } else {
+            Some(&card.extra)
+        };
+        self.db
+            .execute(
+                "INSERT INTO cards(deck_id, question, answer, extra, choices, correct_index) VALUES(?1, ?2, ?3, ?4, ?5, ?6)",
+                params![deck_id, card.question, card.answer, extra_value, choices_value, card.correct_index],
+            )
+            .map_err(|e| e.to_string())?;
+        let id = self.db.last_insert_rowid();
+        self.replace_card_tags(id, &card.tags)?;
+        Ok(id)
+    }
+
+    fn replace_card_tags(&self, card_id: i64, tags: &[String]) -> Result<(), String> {
+        self.db
+            .execute("DELETE FROM card_tags WHERE card_id = ?1", params![card_id])
+            .map_err(|e| e.to_string())?;
+        for tag in tags {
+            self.db
+                .execute(
+                    "INSERT OR IGNORE INTO card_tags(card_id, tag) VALUES(?1, ?2)",
+                    params![card_id, tag],
+                )
+                .map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    }
+
+    pub fn list_cards(&self, deck_id: i64, limit: i64) -> Result<Vec<Card>, String> {
+        let limit = if limit <= 0 { 50 } else { limit };
+        let mut stmt = self
+            .db
+            .prepare(
+                "SELECT id, deck_id, question, answer, COALESCE(extra,'') as extra, choices, correct_index
+                 FROM cards WHERE deck_id = ?1 ORDER BY id LIMIT ?2",
+            )
+            .map_err(|e| e.to_string())?;
+        let cards: Vec<Card> = stmt
+            .query_map(params![deck_id, limit], |row| {
+                Ok(scan_card(row))
+            })
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+        let card_ids: Vec<i64> = cards.iter().map(|c| c.id).collect();
+        let tags_by_card = self.tags_for_cards(&card_ids)?;
+        let mut cards = cards;
+        for card in &mut cards {
+            if let Some(tags) = tags_by_card.get(&card.id) {
+                card.tags = tags.clone();
+            }
+        }
+        Ok(cards)
+    }
+
+    pub fn get_card(&self, deck_id: i64, card_id: i64) -> Result<Card, String> {
+        let mut stmt = self
+            .db
+            .prepare(
+                "SELECT id, deck_id, question, answer, COALESCE(extra,'') as extra, choices, correct_index
+                 FROM cards WHERE deck_id = ?1 AND id = ?2",
+            )
+            .map_err(|e| e.to_string())?;
+        let mut card: Card = stmt
+            .query_row(params![deck_id, card_id], |row| Ok(scan_card(row)))
+            .map_err(|_| format!("card {card_id} not found in deck"))?;
+        card.tags = self.tags_for_card(card_id)?;
+        Ok(card)
+    }
+
+    pub fn update_card(
+        &self,
+        deck_id: i64,
+        card_id: i64,
+        question: Option<&str>,
+        answer: Option<&str>,
+        extra: Option<&str>,
+        choices: Option<&[String]>,
+        correct_index: Option<i64>,
+        tags: Option<&[String]>,
+    ) -> Result<(), String> {
+        let mut sets = Vec::new();
+        let mut args: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+        if let Some(q) = question {
+            sets.push("question = ?");
+            args.push(Box::new(q.to_string()));
+        }
+        if let Some(a) = answer {
+            sets.push("answer = ?");
+            args.push(Box::new(a.to_string()));
+        }
+        if let Some(e) = extra {
+            sets.push("extra = ?");
+            let val: Option<String> = if e.is_empty() { None } else { Some(e.to_string()) };
+            args.push(Box::new(val));
+        }
+        if let Some(c) = choices {
+            sets.push("choices = ?");
+            args.push(Box::new(encode_choices(c)));
+        }
+        if let Some(ci) = correct_index {
+            sets.push("correct_index = ?");
+            args.push(Box::new(ci));
+        }
+
+        if !sets.is_empty() {
+            args.push(Box::new(deck_id));
+            args.push(Box::new(card_id));
+            let query = format!(
+                "UPDATE cards SET {}, updated_at = CURRENT_TIMESTAMP WHERE deck_id = ? AND id = ?",
+                sets.join(", ")
+            );
+            let params: Vec<&dyn rusqlite::types::ToSql> =
+                args.iter().map(|a| a.as_ref()).collect();
+            let changes = self
+                .db
+                .execute(&query, params.as_slice())
+                .map_err(|e| e.to_string())?;
+            if changes == 0 {
+                return Err(format!("card {card_id} not found in deck"));
+            }
+        } else if tags.is_some() {
+            self.ensure_card(deck_id, card_id)?;
+        }
+
+        if let Some(t) = tags {
+            self.replace_card_tags(card_id, t)?;
+        }
+        Ok(())
+    }
+
+    pub fn delete_card(&self, deck_id: i64, card_id: i64) -> Result<(), String> {
+        let changes = self
+            .db
+            .execute(
+                "DELETE FROM cards WHERE deck_id = ?1 AND id = ?2",
+                params![deck_id, card_id],
+            )
+            .map_err(|e| e.to_string())?;
+        if changes == 0 {
+            return Err(format!("card {card_id} not found in deck"));
+        }
+        Ok(())
+    }
+
+    fn ensure_card(&self, deck_id: i64, card_id: i64) -> Result<(), String> {
+        let mut stmt = self
+            .db
+            .prepare("SELECT 1 FROM cards WHERE deck_id = ?1 AND id = ?2")
+            .map_err(|e| e.to_string())?;
+        stmt.query_row(params![deck_id, card_id], |_| Ok(()))
+            .map_err(|_| format!("card {card_id} not found in deck"))
+    }
+
+    fn tags_for_card(&self, card_id: i64) -> Result<Vec<String>, String> {
+        let mut stmt = self
+            .db
+            .prepare("SELECT tag FROM card_tags WHERE card_id = ?1 ORDER BY tag")
+            .map_err(|e| e.to_string())?;
+        let tags = stmt
+            .query_map(params![card_id], |row| row.get::<_, String>(0))
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+        Ok(tags)
+    }
+
+    fn tags_for_cards(&self, card_ids: &[i64]) -> Result<HashMap<i64, Vec<String>>, String> {
+        if card_ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let placeholders: Vec<String> = (1..=card_ids.len()).map(|i| format!("?{i}")).collect();
+        let query = format!(
+            "SELECT card_id, tag FROM card_tags WHERE card_id IN ({}) ORDER BY card_id, tag",
+            placeholders.join(",")
+        );
+        let mut stmt = self.db.prepare(&query).map_err(|e| e.to_string())?;
+        let params: Vec<&dyn rusqlite::types::ToSql> =
+            card_ids.iter().map(|id| id as &dyn rusqlite::types::ToSql).collect();
+        let rows = stmt
+            .query_map(params.as_slice(), |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|e| e.to_string())?;
+        let mut map: HashMap<i64, Vec<String>> = HashMap::new();
+        for r in rows {
+            let (card_id, tag) = r.map_err(|e| e.to_string())?;
+            map.entry(card_id).or_default().push(tag);
+        }
+        Ok(map)
+    }
+
+    // --- Scenario CRUD ---
+
+    pub fn create_scenario(
+        &self,
+        name: &str,
+        description: &str,
+        repo_path: &str,
+        skill_ids: &[i64],
+    ) -> Result<i64, String> {
+        let desc: Option<&str> = if description.is_empty() {
+            None
+        } else {
+            Some(description)
+        };
+        let repo: Option<&str> = if repo_path.is_empty() {
+            None
+        } else {
+            Some(repo_path)
+        };
+        self.db
+            .execute(
+                "INSERT INTO scenarios(name, description, repo_path) VALUES(?1, ?2, ?3)",
+                params![name, desc, repo],
+            )
+            .map_err(|e| e.to_string())?;
+        let id = self.db.last_insert_rowid();
+        for &sid in skill_ids {
+            self.db
+                .execute(
+                    "INSERT OR IGNORE INTO scenario_skills(scenario_id, skill_id) VALUES(?1, ?2)",
+                    params![id, sid],
+                )
+                .map_err(|e| e.to_string())?;
+        }
+        Ok(id)
+    }
+
+    pub fn list_scenarios(&self, status: &str) -> Result<Vec<Scenario>, String> {
+        let mut scenarios = if status.is_empty() {
+            let mut stmt = self
+                .db
+                .prepare(
+                    "SELECT id, name, COALESCE(description,'') as description, COALESCE(repo_path,'') as repo_path,
+                            status, created_at, updated_at, COALESCE(completed_at,'') as completed_at
+                     FROM scenarios ORDER BY name ASC",
+                )
+                .map_err(|e| e.to_string())?;
+            let rows = stmt.query_map([], |row| {
+                Ok(Scenario {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    description: row.get(2)?,
+                    repo_path: row.get(3)?,
+                    status: row.get(4)?,
+                    skills: vec![],
+                    created_at: row.get(5)?,
+                    updated_at: row.get(6)?,
+                    completed_at: row.get(7)?,
+                })
+            })
+            .map_err(|e| e.to_string())?;
+            rows.collect::<Result<Vec<_>, _>>()
+                .map_err(|e| e.to_string())?
+        } else {
+            let mut stmt = self
+                .db
+                .prepare(
+                    "SELECT id, name, COALESCE(description,'') as description, COALESCE(repo_path,'') as repo_path,
+                            status, created_at, updated_at, COALESCE(completed_at,'') as completed_at
+                     FROM scenarios WHERE status = ?1 ORDER BY name ASC",
+                )
+                .map_err(|e| e.to_string())?;
+            let rows = stmt.query_map(params![status], |row| {
+                Ok(Scenario {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    description: row.get(2)?,
+                    repo_path: row.get(3)?,
+                    status: row.get(4)?,
+                    skills: vec![],
+                    created_at: row.get(5)?,
+                    updated_at: row.get(6)?,
+                    completed_at: row.get(7)?,
+                })
+            })
+            .map_err(|e| e.to_string())?;
+            rows.collect::<Result<Vec<_>, _>>()
+                .map_err(|e| e.to_string())?
+        };
+        for sc in &mut scenarios {
+            sc.skills = self.skills_for_scenario(sc.id)?;
+        }
+        Ok(scenarios)
+    }
+
+    pub fn get_scenario(&self, id: i64) -> Result<Scenario, String> {
+        let mut stmt = self
+            .db
+            .prepare(
+                "SELECT id, name, COALESCE(description,'') as description, COALESCE(repo_path,'') as repo_path,
+                        status, created_at, updated_at, COALESCE(completed_at,'') as completed_at
+                 FROM scenarios WHERE id = ?1",
+            )
+            .map_err(|e| e.to_string())?;
+        let mut sc: Scenario = stmt
+            .query_row(params![id], |row| {
+                Ok(Scenario {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    description: row.get(2)?,
+                    repo_path: row.get(3)?,
+                    status: row.get(4)?,
+                    skills: vec![],
+                    created_at: row.get(5)?,
+                    updated_at: row.get(6)?,
+                    completed_at: row.get(7)?,
+                })
+            })
+            .map_err(|_| format!("scenario {id} not found"))?;
+        sc.skills = self.skills_for_scenario(id)?;
+        Ok(sc)
+    }
+
+    pub fn update_scenario(
+        &self,
+        id: i64,
+        name: Option<&str>,
+        description: Option<&str>,
+        repo_path: Option<&str>,
+        status: Option<&str>,
+    ) -> Result<(), String> {
+        let mut sets = Vec::new();
+        let mut args: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+        if let Some(n) = name {
+            sets.push("name = ?");
+            args.push(Box::new(n.to_string()));
+        }
+        if let Some(d) = description {
+            sets.push("description = ?");
+            let val: Option<String> = if d.is_empty() { None } else { Some(d.to_string()) };
+            args.push(Box::new(val));
+        }
+        if let Some(r) = repo_path {
+            sets.push("repo_path = ?");
+            let val: Option<String> = if r.is_empty() { None } else { Some(r.to_string()) };
+            args.push(Box::new(val));
+        }
+        if let Some(s) = status {
+            sets.push("status = ?");
+            args.push(Box::new(s.to_string()));
+            if s == "completed" {
+                sets.push("completed_at = CURRENT_TIMESTAMP");
+            }
+        }
+        if sets.is_empty() {
+            return Ok(());
+        }
+        args.push(Box::new(id));
+        let query = format!("UPDATE scenarios SET {} WHERE id = ?", sets.join(", "));
+        let params: Vec<&dyn rusqlite::types::ToSql> = args.iter().map(|a| a.as_ref()).collect();
+        let changes = self
+            .db
+            .execute(&query, params.as_slice())
+            .map_err(|e| e.to_string())?;
+        if changes == 0 {
+            return Err(format!("scenario {id} not found"));
+        }
+        Ok(())
+    }
+
+    pub fn delete_scenario(&self, id: i64) -> Result<(), String> {
+        let changes = self
+            .db
+            .execute("DELETE FROM scenarios WHERE id = ?1", params![id])
+            .map_err(|e| e.to_string())?;
+        if changes == 0 {
+            return Err(format!("scenario {id} not found"));
+        }
+        Ok(())
+    }
+
+    fn skills_for_scenario(&self, scenario_id: i64) -> Result<Vec<Skill>, String> {
+        let mut stmt = self
+            .db
+            .prepare(
+                "SELECT sk.id, sk.parent_id, sk.name, COALESCE(sk.description,'') as description, sk.level, sk.created_at, sk.updated_at
+                 FROM scenario_skills ss
+                 JOIN skills sk ON sk.id = ss.skill_id
+                 WHERE ss.scenario_id = ?1
+                 ORDER BY sk.name",
+            )
+            .map_err(|e| e.to_string())?;
+        let skills = stmt
+            .query_map(params![scenario_id], |row| {
+                Ok(Skill {
+                    id: row.get(0)?,
+                    parent_id: row.get(1)?,
+                    name: row.get(2)?,
+                    description: row.get(3)?,
+                    level: row.get(4)?,
+                    children: vec![],
+                    decks: vec![],
+                    scenarios: vec![],
+                    created_at: row.get(5)?,
+                    updated_at: row.get(6)?,
+                })
+            })
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+        Ok(skills)
+    }
+
+    // --- Junction tables ---
+
+    pub fn link_deck_skill(&self, deck_id: i64, skill_id: i64) -> Result<(), String> {
+        self.db
+            .execute(
+                "INSERT OR IGNORE INTO deck_skills(deck_id, skill_id) VALUES(?1, ?2)",
+                params![deck_id, skill_id],
+            )
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    pub fn unlink_deck_skill(&self, deck_id: i64, skill_id: i64) -> Result<(), String> {
+        self.db
+            .execute(
+                "DELETE FROM deck_skills WHERE deck_id = ?1 AND skill_id = ?2",
+                params![deck_id, skill_id],
+            )
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    pub fn link_scenario_skill(&self, scenario_id: i64, skill_id: i64) -> Result<(), String> {
+        self.db
+            .execute(
+                "INSERT OR IGNORE INTO scenario_skills(scenario_id, skill_id) VALUES(?1, ?2)",
+                params![scenario_id, skill_id],
+            )
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    pub fn unlink_scenario_skill(&self, scenario_id: i64, skill_id: i64) -> Result<(), String> {
+        self.db
+            .execute(
+                "DELETE FROM scenario_skills WHERE scenario_id = ?1 AND skill_id = ?2",
+                params![scenario_id, skill_id],
+            )
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    // --- Review by skill ---
+
+    pub fn cards_for_skill(&self, skill_id: i64, limit: i64) -> Result<Vec<Card>, String> {
+        let limit = if limit <= 0 { 50 } else { limit };
+        let mut skill_ids = self.descendant_skill_ids(skill_id)?;
+        skill_ids.push(skill_id);
+
+        let placeholders: Vec<String> =
+            (1..=skill_ids.len()).map(|i| format!("?{i}")).collect();
+        let query = format!(
+            "SELECT DISTINCT deck_id FROM deck_skills WHERE skill_id IN ({})",
+            placeholders.join(",")
+        );
+        let mut stmt = self.db.prepare(&query).map_err(|e| e.to_string())?;
+        let params: Vec<&dyn rusqlite::types::ToSql> =
+            skill_ids.iter().map(|id| id as &dyn rusqlite::types::ToSql).collect();
+        let deck_ids: Vec<i64> = stmt
+            .query_map(params.as_slice(), |row| row.get::<_, i64>(0))
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+
+        if deck_ids.is_empty() {
+            return Ok(vec![]);
+        }
+
+        let d_placeholders: Vec<String> =
+            (1..=deck_ids.len()).map(|i| format!("?{i}")).collect();
+        let cquery = format!(
+            "SELECT id, deck_id, question, answer, COALESCE(extra,'') as extra, choices, correct_index
+             FROM cards WHERE deck_id IN ({}) ORDER BY id LIMIT ?{}",
+            d_placeholders.join(","),
+            deck_ids.len() + 1
+        );
+        let mut cstmt = self.db.prepare(&cquery).map_err(|e| e.to_string())?;
+        let mut cparams: Vec<Box<dyn rusqlite::types::ToSql>> =
+            deck_ids.iter().map(|id| Box::new(*id) as Box<dyn rusqlite::types::ToSql>).collect();
+        cparams.push(Box::new(limit));
+        let cparams_ref: Vec<&dyn rusqlite::types::ToSql> =
+            cparams.iter().map(|p| p.as_ref()).collect();
+        let mut cards: Vec<Card> = cstmt
+            .query_map(cparams_ref.as_slice(), |row| Ok(scan_card(row)))
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+
+        let card_ids: Vec<i64> = cards.iter().map(|c| c.id).collect();
+        let tags_by_card = self.tags_for_cards(&card_ids)?;
+        for card in &mut cards {
+            if let Some(tags) = tags_by_card.get(&card.id) {
+                card.tags = tags.clone();
+            }
+        }
+        Ok(cards)
+    }
+
+    fn descendant_skill_ids(&self, parent_id: i64) -> Result<Vec<i64>, String> {
+        let mut stmt = self
+            .db
+            .prepare("SELECT id FROM skills WHERE parent_id = ?1")
+            .map_err(|e| e.to_string())?;
+        let ids: Vec<i64> = stmt
+            .query_map(params![parent_id], |row| row.get::<_, i64>(0))
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+        let mut all_desc = ids.clone();
+        for child_id in &ids {
+            all_desc.extend(self.descendant_skill_ids(*child_id)?);
+        }
+        Ok(all_desc)
+    }
+
+    // --- Import from quiz ---
+
+    pub fn import_from_quiz(&self, quiz_db_path: &str) -> Result<(i64, i64), String> {
+        let quiz_db = Connection::open_with_flags(
+            quiz_db_path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )
+        .map_err(|e| format!("open quiz db: {e}"))?;
+
+        let mut qstmt = quiz_db
+            .prepare("SELECT id, name, COALESCE(description,'') as description FROM decks ORDER BY id")
+            .map_err(|e| e.to_string())?;
+        let qdecks: Vec<(i64, String, String)> = qstmt
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+
+        let existing_decks = self.list_decks()?;
+        let existing_names: HashSet<String> =
+            existing_decks.iter().map(|d| d.name.clone()).collect();
+
+        let mut decks_imported: i64 = 0;
+        let mut cards_imported: i64 = 0;
+
+        for (qd_id, qd_name, qd_desc) in &qdecks {
+            if existing_names.contains(qd_name) {
+                continue;
+            }
+
+            self.db
+                .execute(
+                    "INSERT INTO decks(name, description) VALUES(?1, ?2)",
+                    params![qd_name, qd_desc],
+                )
+                .map_err(|e| e.to_string())?;
+            let new_deck_id = self.db.last_insert_rowid();
+            decks_imported += 1;
+
+            let mut cstmt = quiz_db
+                .prepare(
+                    "SELECT id, question, answer, COALESCE(extra,'') as extra, choices, correct_index
+                     FROM cards WHERE deck_id = ?1 ORDER BY id",
+                )
+                .map_err(|e| e.to_string())?;
+            let qcards: Vec<(i64, String, String, String, Option<String>, Option<i64>)> = cstmt
+                .query_map(params![qd_id], |row| {
+                    Ok((
+                        row.get::<_, i64>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, Option<String>>(4)?,
+                        row.get::<_, Option<i64>>(5)?,
+                    ))
+                })
+                .map_err(|e| e.to_string())?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| e.to_string())?;
+
+            for (qc_id, question, answer, extra, choices_raw, correct_index) in &qcards {
+                let choices = decode_choices(choices_raw.as_deref());
+                let choices_value = encode_choices(&choices);
+                let extra_value: Option<&str> = if extra.is_empty() { None } else { Some(extra) };
+
+                self.db
+                    .execute(
+                        "INSERT INTO cards(deck_id, question, answer, extra, choices, correct_index) VALUES(?1, ?2, ?3, ?4, ?5, ?6)",
+                        params![new_deck_id, question, answer, extra_value, choices_value, correct_index],
+                    )
+                    .map_err(|e| e.to_string())?;
+                let new_card_id = self.db.last_insert_rowid();
+
+                let mut tstmt = quiz_db
+                    .prepare("SELECT tag FROM card_tags WHERE card_id = ?1 ORDER BY tag")
+                    .map_err(|e| e.to_string())?;
+                let qtags: Vec<String> = tstmt
+                    .query_map(params![qc_id], |row| row.get::<_, String>(0))
+                    .map_err(|e| e.to_string())?
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|e| e.to_string())?;
+
+                for tag in &qtags {
+                    self.db
+                        .execute(
+                            "INSERT OR IGNORE INTO card_tags(card_id, tag) VALUES(?1, ?2)",
+                            params![new_card_id, tag],
+                        )
+                        .map_err(|e| e.to_string())?;
+                }
+
+                cards_imported += 1;
+            }
+        }
+
+        Ok((decks_imported, cards_imported))
+    }
+}
+
+// --- Helpers ---
+
+fn scan_card(row: &rusqlite::Row) -> Card {
+    let choices_raw: Option<String> = row.get(5).unwrap_or(None);
+    Card {
+        id: row.get(0).unwrap_or(0),
+        deck_id: row.get(1).unwrap_or(0),
+        question: row.get(2).unwrap_or_default(),
+        answer: row.get(3).unwrap_or_default(),
+        extra: row.get(4).unwrap_or_default(),
+        choices: decode_choices(choices_raw.as_deref()),
+        correct_index: row.get(6).unwrap_or(None),
+        tags: vec![],
+    }
+}
+
+fn build_tree(all: Vec<Skill>) -> Vec<Skill> {
+    let mut by_id: HashMap<i64, Skill> = HashMap::new();
+    for sk in all {
+        by_id.insert(sk.id, sk);
+    }
+
+    let ids: Vec<i64> = by_id.keys().copied().collect();
+    let mut child_map: HashMap<i64, Vec<i64>> = HashMap::new();
+    let mut root_ids: Vec<i64> = Vec::new();
+
+    for &id in &ids {
+        let parent_id = by_id[&id].parent_id;
+        if let Some(pid) = parent_id {
+            if by_id.contains_key(&pid) {
+                child_map.entry(pid).or_default().push(id);
+            } else {
+                root_ids.push(id);
+            }
+        } else {
+            root_ids.push(id);
+        }
+    }
+
+    // Sort children by name
+    for children in child_map.values_mut() {
+        children.sort_by(|a, b| {
+            let a_name = &by_id[a].name;
+            let b_name = &by_id[b].name;
+            a_name.cmp(b_name)
+        });
+    }
+    root_ids.sort_by(|a, b| by_id[a].name.cmp(&by_id[b].name));
+
+    fn build_subtree(
+        id: i64,
+        by_id: &mut HashMap<i64, Skill>,
+        child_map: &HashMap<i64, Vec<i64>>,
+    ) -> Skill {
+        let child_ids = child_map.get(&id).cloned().unwrap_or_default();
+        let children: Vec<Skill> = child_ids
+            .iter()
+            .map(|&cid| build_subtree(cid, by_id, child_map))
+            .collect();
+        let mut skill = by_id.remove(&id).unwrap();
+        skill.children = children;
+        skill
+    }
+
+    root_ids
+        .iter()
+        .map(|&id| build_subtree(id, &mut by_id, &child_map))
+        .collect()
+}

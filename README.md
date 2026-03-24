@@ -28,17 +28,10 @@ During that process, the agent is usually the one organizing the skill tree, wri
 Build and install from the repo:
 
 ```bash
-bun install
 ./install.sh
 ```
 
-This compiles a standalone binary to `~/.local/bin/skill-tree` using `bun build --compile`.
-
-To run directly without compiling:
-
-```bash
-bun src/cli.ts --help
-```
+This compiles a release binary and installs it to `~/.local/bin/skill-tree`.
 
 Then install the bundled `skill-tree` skill so your agent can use the stored data as tutoring context:
 
@@ -67,14 +60,12 @@ The core workflow runs entirely on local data.
 ## Development
 
 ```bash
-bun install          # install dependencies
-bun src/cli.ts       # run the CLI directly
-bun test             # run tests
-bun run typecheck    # type-check without emitting
+cargo build          # compile
+cargo run -- --help  # run directly
 ./install.sh         # compile standalone binary
 ```
 
-The project uses TypeScript on Bun, with Commander for the CLI, Ink (React) for the interactive TUI, and bun:sqlite for storage.
+The project uses Rust with Ratatui for the TUI, Clap for the CLI, and rusqlite for storage.
 
 ## License
 

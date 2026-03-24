@@ -1,43 +1,38 @@
 # skill-tree
 
-A local-first learning CLI that tracks skills, quiz decks, hands-on scenarios, and proficiency levels. Built with TypeScript on Bun, using Ink for the interactive TUI and Commander for the CLI.
+A local-first learning CLI that tracks skills, quiz decks, hands-on scenarios, and proficiency levels. Built with Rust, using Ratatui for the interactive TUI and Clap for the CLI.
 
 ## Stack
 
-- **Runtime:** Bun
-- **Language:** TypeScript
-- **CLI framework:** Commander
-- **TUI:** Ink (React for terminal)
-- **Database:** bun:sqlite (via cli-core's `openSQLite()`)
-- **Local dependency:** `cli-core` (file:../packages/cli-core) for output helpers, SQLite wrappers, and skill installer
+- **Language:** Rust
+- **CLI framework:** Clap (derive)
+- **TUI:** Ratatui + Crossterm
+- **Database:** rusqlite (bundled SQLite)
+- **Local dependency:** `cli-core` (path = "../packages/cli-core") for output helpers, SQLite wrappers, and skill installer
 
 ## File Structure
 
 ```
-src/cli.ts          — CLI entry point, all Commander commands and TUI launchers
-src/store.ts        — SQLite schema, migrations, all CRUD operations (Store class)
-src/tui-app.tsx     — Interactive skill tree browser + review session (Ink/React)
-src/tui-helpers.ts  — Level labels, bars, colors, status icons
-src/index.ts        — Public exports (Store, types, helpers)
+src/main.rs         — CLI entry point, all Clap commands and TUI launchers
+src/store.rs        — SQLite schema, migrations, all CRUD operations (Store struct)
+src/tui.rs          — Interactive skill tree browser + review session (Ratatui)
+src/tui_helpers.rs  — Level labels, bars, colors, status icons
 skills/skill-tree/  — Agent skill definition (SKILL.md)
-install.sh          — Compiles binary to ~/.local/bin/skill-tree via `bun build --compile`
+install.sh          — Builds release binary and copies to ~/.local/bin/skill-tree
 ```
 
 ## Commands
 
 ```bash
-bun install              # install deps
-bun src/cli.ts --help    # run directly
-bun test                 # run tests
-bun run typecheck        # type-check without emitting
-./install.sh             # compile standalone binary to ~/.local/bin/skill-tree
+cargo build              # compile
+cargo run -- --help      # run directly
+./install.sh             # build release binary to ~/.local/bin/skill-tree
 ```
 
 ## Conventions
 
-- Input validation: `validateLevel()` for levels 0-5, `validateStatus()` for scenario status
-- Multi-statement writes use `db.transaction()`
-- Database lives at `~/.skill-tree/skill-tree.db`, opened via cli-core's `openSQLite()`
+- Input validation: `validate_level()` for levels 0-5, `validate_status()` for scenario status
+- Database lives at `~/.skill-tree/skill-tree.db`, opened via cli-core's `open_sqlite()`
 - Decks and cards can be created via `--data`/`--file` JSON payloads or individual flags
 - Card IDs support comma-separated lists and ranges (e.g., `1,3,5-10`)
 
