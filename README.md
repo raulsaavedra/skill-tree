@@ -25,7 +25,7 @@ During that process, the agent is usually the one organizing the skill tree, wri
 
 ## Installation
 
-For local development, build and install from the repo:
+Build and install from the repo:
 
 ```bash
 bun install
