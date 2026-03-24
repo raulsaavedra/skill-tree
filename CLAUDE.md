@@ -2,34 +2,35 @@
 
 ## Layout
 
-- `cmd/skill-tree/main.go` — CLI entry point, all Cobra commands
-- `internal/store/store.go` — SQLite schema, migrations, all CRUD operations
-- `internal/store/store_test.go` — Store tests (run with `go test ./...`)
-- `internal/tui/tree.go` — interactive skill tree + app composition
-- `internal/tui/review.go` — review session TUI model
-- `internal/tui/markdown.go` — markdown rendering helpers for TUI
+- `src/cli.ts` — CLI entry point, all Commander commands
+- `src/store.ts` — SQLite schema, migrations, all CRUD operations
+- `src/tui-app.tsx` — interactive skill tree + review session (Ink/React)
+- `src/tui-helpers.ts` — level labels, bars, colors
+- `src/index.ts` — public exports
 - `skills/skill-tree/SKILL.md` — agent skill definition for integrating `skill-tree` into agent workflows
-- `install.sh` — Builds binary to ~/.local/bin/skill-tree
+- `install.sh` — Compiles binary to ~/.local/bin/skill-tree
 
 ## Build & test
 
 ```
-./install.sh          # build + install
-go test ./...         # run store tests
-go build ./...        # compile check
+bun install             # install deps
+bun src/cli.ts --help   # run directly
+./install.sh            # compile + install binary
+bun test                # run tests
 ```
 
 ## Dependencies
 
-- Uses the published `github.com/raulsaavedra/cli-core` Go module
-- Can be built as a standalone repo without a sibling workspace dependency
+- Uses local `cli-core` package (file:../packages/cli-core) for output helpers, sqlite, skills installer
+- Runtime: Bun with bun:sqlite
+- CLI framework: Commander
+- TUI: Ink (React for terminal)
 
 ## Conventions
 
-- Always use single-line commands (no backslash continuations) for CLI operations
-- Input validation: `store.ValidateLevel()` for levels 0-5, `store.ValidateStatus()` for scenario status
-- Multi-statement writes use transactions (`db.Begin()` / `tx.Commit()` / `defer tx.Rollback()`)
-- Database lives at `~/.skill-tree/skill-tree.db`, opened via `sqliteutil.OpenSQLite()`
+- Input validation: `validateLevel()` for levels 0-5, `validateStatus()` for scenario status
+- Multi-statement writes use `db.transaction()`
+- Database lives at `~/.skill-tree/skill-tree.db`, opened via cli-core's `openSQLite()`
 
 ## Data model
 
