@@ -1,7 +1,22 @@
+# Build output
+/target/
+
+# Database
 *.db
 *.db-journal
 *.db-wal
 *.db-shm
-*.bun-build
-node_modules/
-/target/
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
