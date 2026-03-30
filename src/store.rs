@@ -468,7 +468,11 @@ impl Store {
         }
         if let Some(d) = description {
             sets.push("description = ?");
-            let val: Option<String> = if d.is_empty() { None } else { Some(d.to_string()) };
+            let val: Option<String> = if d.is_empty() {
+                None
+            } else {
+                Some(d.to_string())
+            };
             args.push(Box::new(val));
         }
         if let Some(l) = level {
@@ -782,8 +786,10 @@ impl Store {
             placeholders.join(",")
         );
         let mut stmt = self.db.prepare(&query).map_err(|e| e.to_string())?;
-        let params: Vec<&dyn rusqlite::types::ToSql> =
-            card_ids.iter().map(|id| id as &dyn rusqlite::types::ToSql).collect();
+        let params: Vec<&dyn rusqlite::types::ToSql> = card_ids
+            .iter()
+            .map(|id| id as &dyn rusqlite::types::ToSql)
+            .collect();
         let rows = stmt
             .query_map(params.as_slice(), |row| row.get::<_, i64>(0))
             .map_err(|e| e.to_string())?;
@@ -872,9 +878,7 @@ impl Store {
             )
             .map_err(|e| e.to_string())?;
         let cards: Vec<Card> = stmt
-            .query_map(params![deck_id, limit], |row| {
-                Ok(scan_card(row))
-            })
+            .query_map(params![deck_id, limit], |row| Ok(scan_card(row)))
             .map_err(|e| e.to_string())?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| e.to_string())?;
@@ -927,7 +931,11 @@ impl Store {
         }
         if let Some(e) = extra {
             sets.push("extra = ?");
-            let val: Option<String> = if e.is_empty() { None } else { Some(e.to_string()) };
+            let val: Option<String> = if e.is_empty() {
+                None
+            } else {
+                Some(e.to_string())
+            };
             args.push(Box::new(val));
         }
         if let Some(c) = choices {
@@ -1011,8 +1019,10 @@ impl Store {
             placeholders.join(",")
         );
         let mut stmt = self.db.prepare(&query).map_err(|e| e.to_string())?;
-        let params: Vec<&dyn rusqlite::types::ToSql> =
-            card_ids.iter().map(|id| id as &dyn rusqlite::types::ToSql).collect();
+        let params: Vec<&dyn rusqlite::types::ToSql> = card_ids
+            .iter()
+            .map(|id| id as &dyn rusqlite::types::ToSql)
+            .collect();
         let rows = stmt
             .query_map(params.as_slice(), |row| {
                 Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
@@ -1073,20 +1083,21 @@ impl Store {
                      FROM scenarios ORDER BY name ASC",
                 )
                 .map_err(|e| e.to_string())?;
-            let rows = stmt.query_map([], |row| {
-                Ok(Scenario {
-                    id: row.get(0)?,
-                    name: row.get(1)?,
-                    description: row.get(2)?,
-                    repo_path: row.get(3)?,
-                    status: row.get(4)?,
-                    skills: vec![],
-                    created_at: row.get(5)?,
-                    updated_at: row.get(6)?,
-                    completed_at: row.get(7)?,
+            let rows = stmt
+                .query_map([], |row| {
+                    Ok(Scenario {
+                        id: row.get(0)?,
+                        name: row.get(1)?,
+                        description: row.get(2)?,
+                        repo_path: row.get(3)?,
+                        status: row.get(4)?,
+                        skills: vec![],
+                        created_at: row.get(5)?,
+                        updated_at: row.get(6)?,
+                        completed_at: row.get(7)?,
+                    })
                 })
-            })
-            .map_err(|e| e.to_string())?;
+                .map_err(|e| e.to_string())?;
             rows.collect::<Result<Vec<_>, _>>()
                 .map_err(|e| e.to_string())?
         } else {
@@ -1098,20 +1109,21 @@ impl Store {
                      FROM scenarios WHERE status = ?1 ORDER BY name ASC",
                 )
                 .map_err(|e| e.to_string())?;
-            let rows = stmt.query_map(params![status], |row| {
-                Ok(Scenario {
-                    id: row.get(0)?,
-                    name: row.get(1)?,
-                    description: row.get(2)?,
-                    repo_path: row.get(3)?,
-                    status: row.get(4)?,
-                    skills: vec![],
-                    created_at: row.get(5)?,
-                    updated_at: row.get(6)?,
-                    completed_at: row.get(7)?,
+            let rows = stmt
+                .query_map(params![status], |row| {
+                    Ok(Scenario {
+                        id: row.get(0)?,
+                        name: row.get(1)?,
+                        description: row.get(2)?,
+                        repo_path: row.get(3)?,
+                        status: row.get(4)?,
+                        skills: vec![],
+                        created_at: row.get(5)?,
+                        updated_at: row.get(6)?,
+                        completed_at: row.get(7)?,
+                    })
                 })
-            })
-            .map_err(|e| e.to_string())?;
+                .map_err(|e| e.to_string())?;
             rows.collect::<Result<Vec<_>, _>>()
                 .map_err(|e| e.to_string())?
         };
@@ -1165,12 +1177,20 @@ impl Store {
         }
         if let Some(d) = description {
             sets.push("description = ?");
-            let val: Option<String> = if d.is_empty() { None } else { Some(d.to_string()) };
+            let val: Option<String> = if d.is_empty() {
+                None
+            } else {
+                Some(d.to_string())
+            };
             args.push(Box::new(val));
         }
         if let Some(r) = repo_path {
             sets.push("repo_path = ?");
-            let val: Option<String> = if r.is_empty() { None } else { Some(r.to_string()) };
+            let val: Option<String> = if r.is_empty() {
+                None
+            } else {
+                Some(r.to_string())
+            };
             args.push(Box::new(val));
         }
         if let Some(s) = status {
@@ -1288,15 +1308,16 @@ impl Store {
         let mut skill_ids = self.descendant_skill_ids(skill_id)?;
         skill_ids.push(skill_id);
 
-        let placeholders: Vec<String> =
-            (1..=skill_ids.len()).map(|i| format!("?{i}")).collect();
+        let placeholders: Vec<String> = (1..=skill_ids.len()).map(|i| format!("?{i}")).collect();
         let query = format!(
             "SELECT DISTINCT deck_id FROM deck_skills WHERE skill_id IN ({})",
             placeholders.join(",")
         );
         let mut stmt = self.db.prepare(&query).map_err(|e| e.to_string())?;
-        let params: Vec<&dyn rusqlite::types::ToSql> =
-            skill_ids.iter().map(|id| id as &dyn rusqlite::types::ToSql).collect();
+        let params: Vec<&dyn rusqlite::types::ToSql> = skill_ids
+            .iter()
+            .map(|id| id as &dyn rusqlite::types::ToSql)
+            .collect();
         let deck_ids: Vec<i64> = stmt
             .query_map(params.as_slice(), |row| row.get::<_, i64>(0))
             .map_err(|e| e.to_string())?
@@ -1307,8 +1328,7 @@ impl Store {
             return Ok(vec![]);
         }
 
-        let d_placeholders: Vec<String> =
-            (1..=deck_ids.len()).map(|i| format!("?{i}")).collect();
+        let d_placeholders: Vec<String> = (1..=deck_ids.len()).map(|i| format!("?{i}")).collect();
         let cquery = format!(
             "SELECT id, deck_id, question, answer, COALESCE(extra,'') as extra, choices, correct_index
              FROM cards WHERE deck_id IN ({}) ORDER BY id LIMIT ?{}",
@@ -1316,8 +1336,10 @@ impl Store {
             deck_ids.len() + 1
         );
         let mut cstmt = self.db.prepare(&cquery).map_err(|e| e.to_string())?;
-        let mut cparams: Vec<Box<dyn rusqlite::types::ToSql>> =
-            deck_ids.iter().map(|id| Box::new(*id) as Box<dyn rusqlite::types::ToSql>).collect();
+        let mut cparams: Vec<Box<dyn rusqlite::types::ToSql>> = deck_ids
+            .iter()
+            .map(|id| Box::new(*id) as Box<dyn rusqlite::types::ToSql>)
+            .collect();
         cparams.push(Box::new(limit));
         let cparams_ref: Vec<&dyn rusqlite::types::ToSql> =
             cparams.iter().map(|p| p.as_ref()).collect();
@@ -1357,14 +1379,14 @@ impl Store {
     // --- Import from quiz ---
 
     pub fn import_from_quiz(&self, quiz_db_path: &str) -> Result<(i64, i64), String> {
-        let quiz_db = Connection::open_with_flags(
-            quiz_db_path,
-            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
-        )
-        .map_err(|e| format!("open quiz db: {e}"))?;
+        let quiz_db =
+            Connection::open_with_flags(quiz_db_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+                .map_err(|e| format!("open quiz db: {e}"))?;
 
         let mut qstmt = quiz_db
-            .prepare("SELECT id, name, COALESCE(description,'') as description FROM decks ORDER BY id")
+            .prepare(
+                "SELECT id, name, COALESCE(description,'') as description FROM decks ORDER BY id",
+            )
             .map_err(|e| e.to_string())?;
         let qdecks: Vec<(i64, String, String)> = qstmt
             .query_map([], |row| {

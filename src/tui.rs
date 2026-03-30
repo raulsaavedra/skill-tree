@@ -2,12 +2,14 @@ use std::collections::{HashMap, HashSet};
 use std::io;
 
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
-use crossterm::terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen};
 use crossterm::execute;
+use crossterm::terminal::{
+    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
+};
+use rand::seq::SliceRandom;
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Paragraph, Wrap};
 use ratatui::Terminal;
-use rand::seq::SliceRandom;
 
 use crate::store::{Card, Deck, Skill, Store};
 use crate::tui_helpers::*;
@@ -70,7 +72,10 @@ impl ReviewState {
     ) -> Self {
         let idx = initial_deck.min(decks.len().saturating_sub(1));
         let (cards, stage, covered_ids) = if start_in_review && !decks.is_empty() {
-            let c = cards_by_deck.get(&decks[idx].id).cloned().unwrap_or_default();
+            let c = cards_by_deck
+                .get(&decks[idx].id)
+                .cloned()
+                .unwrap_or_default();
             let card_ids: Vec<i64> = c.iter().map(|x| x.id).collect();
             let covered = store.covered_card_ids(&card_ids).unwrap_or_default();
             let s = if c.is_empty() {
@@ -100,7 +105,11 @@ impl ReviewState {
 
     fn activate_deck(&mut self, index: usize, store: &Store) {
         let deck = &self.decks[index];
-        self.cards = self.cards_by_deck.get(&deck.id).cloned().unwrap_or_default();
+        self.cards = self
+            .cards_by_deck
+            .get(&deck.id)
+            .cloned()
+            .unwrap_or_default();
         self.card_cursor = 0;
         self.choice_cursor = 0;
         self.show_answer = false;
@@ -172,7 +181,12 @@ struct TreeState {
 impl TreeState {
     fn flat_nodes(&self) -> Vec<FlatNode> {
         let mut nodes = Vec::new();
-        fn walk(skills: &[Skill], depth: usize, expanded: &HashSet<i64>, nodes: &mut Vec<FlatNode>) {
+        fn walk(
+            skills: &[Skill],
+            depth: usize,
+            expanded: &HashSet<i64>,
+            nodes: &mut Vec<FlatNode>,
+        ) {
             for skill in skills {
                 nodes.push(FlatNode {
                     skill: skill.clone(),
@@ -198,10 +212,19 @@ impl TreeState {
                 level: skill.level,
                 deck_start: d_decks.len(),
                 deck_count: skill.decks.len(),
-                scenarios: skill.scenarios.iter().map(|s| (s.name.clone(), s.status.clone())).collect(),
+                scenarios: skill
+                    .scenarios
+                    .iter()
+                    .map(|s| (s.name.clone(), s.status.clone()))
+                    .collect(),
             });
             d_decks.extend(skill.decks.clone());
-            d_scenarios.extend(skill.scenarios.iter().map(|s| (s.name.clone(), s.status.clone())));
+            d_scenarios.extend(
+                skill
+                    .scenarios
+                    .iter()
+                    .map(|s| (s.name.clone(), s.status.clone())),
+            );
         }
 
         for child in &skill.children {
@@ -213,10 +236,19 @@ impl TreeState {
                 level: child.level,
                 deck_start: d_decks.len(),
                 deck_count: child.decks.len(),
-                scenarios: child.scenarios.iter().map(|s| (s.name.clone(), s.status.clone())).collect(),
+                scenarios: child
+                    .scenarios
+                    .iter()
+                    .map(|s| (s.name.clone(), s.status.clone()))
+                    .collect(),
             });
             d_decks.extend(child.decks.clone());
-            d_scenarios.extend(child.scenarios.iter().map(|s| (s.name.clone(), s.status.clone())));
+            d_scenarios.extend(
+                child
+                    .scenarios
+                    .iter()
+                    .map(|s| (s.name.clone(), s.status.clone())),
+            );
         }
 
         self.detail_decks = d_decks;
@@ -336,7 +368,10 @@ fn leaf_info(skill: &Skill) -> String {
         parts.push(format!("{d} {}", if d == 1 { "deck" } else { "decks" }));
     }
     if s > 0 {
-        parts.push(format!("{s} {}", if s == 1 { "scenario" } else { "scenarios" }));
+        parts.push(format!(
+            "{s} {}",
+            if s == 1 { "scenario" } else { "scenarios" }
+        ));
     }
     format!("[{}]", parts.join(" · "))
 }
@@ -402,7 +437,14 @@ pub fn run_review(
     start_in_review: bool,
     store: &Store,
 ) -> io::Result<()> {
-    let mut review = ReviewState::new(decks, cards_by_deck, selected_deck, mode, start_in_review, store);
+    let mut review = ReviewState::new(
+        decks,
+        cards_by_deck,
+        selected_deck,
+        mode,
+        start_in_review,
+        store,
+    );
 
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -570,7 +612,10 @@ fn run_tree_loop(
                         let q = state.search_query.clone();
                         state.apply_search(&q);
                     }
-                    KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) && !key.modifiers.contains(KeyModifiers::ALT) => {
+                    KeyCode::Char(c)
+                        if !key.modifiers.contains(KeyModifiers::CONTROL)
+                            && !key.modifiers.contains(KeyModifiers::ALT) =>
+                    {
                         state.search_query.push(c);
                         let q = state.search_query.clone();
                         state.apply_search(&q);
@@ -599,12 +644,17 @@ fn run_tree_loop(
                         state.search_idx = 0;
                     }
                 }
-                KeyCode::Char('n') if state.search_confirmed && !state.search_matches.is_empty() => {
+                KeyCode::Char('n')
+                    if state.search_confirmed && !state.search_matches.is_empty() =>
+                {
                     state.search_idx = (state.search_idx + 1) % state.search_matches.len();
                     state.cursor = state.search_matches[state.search_idx];
                 }
-                KeyCode::Char('N') if state.search_confirmed && !state.search_matches.is_empty() => {
-                    state.search_idx = (state.search_idx + state.search_matches.len() - 1) % state.search_matches.len();
+                KeyCode::Char('N')
+                    if state.search_confirmed && !state.search_matches.is_empty() =>
+                {
+                    state.search_idx = (state.search_idx + state.search_matches.len() - 1)
+                        % state.search_matches.len();
                     state.cursor = state.search_matches[state.search_idx];
                 }
                 KeyCode::Up | KeyCode::Char('k') => {
@@ -776,7 +826,8 @@ fn handle_review_input(key: KeyEvent, review: &mut ReviewState, store: &Store) -
                 if review.effective_mode() == "mcq" {
                     if let Some(card) = review.current_card() {
                         if !card.choices.is_empty() {
-                            review.choice_cursor = (review.choice_cursor + card.choices.len() - 1) % card.choices.len();
+                            review.choice_cursor = (review.choice_cursor + card.choices.len() - 1)
+                                % card.choices.len();
                         }
                     }
                 }
@@ -854,7 +905,9 @@ fn draw_tree(f: &mut Frame, state: &TreeState) {
 
     lines.push(Line::from(Span::styled(
         "Skill Tree",
-        Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD),
     )));
     lines.push(Line::from(""));
 
@@ -862,7 +915,10 @@ fn draw_tree(f: &mut Frame, state: &TreeState) {
         lines.push(Line::from("No skills found."));
         lines.push(Line::from("Use the CLI to add skills to your tree."));
         lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled("q Quit", Style::default().fg(Color::DarkGray))));
+        lines.push(Line::from(Span::styled(
+            "q Quit",
+            Style::default().fg(Color::DarkGray),
+        )));
     } else {
         // Determine visible window for scrolling
         let max_visible = area.height.saturating_sub(5) as usize; // header + footer + padding
@@ -873,7 +929,12 @@ fn draw_tree(f: &mut Frame, state: &TreeState) {
         };
         let visible_end = (scroll_offset + max_visible).min(flat_nodes.len());
 
-        for (i, node) in flat_nodes.iter().enumerate().skip(scroll_offset).take(visible_end - scroll_offset) {
+        for (i, node) in flat_nodes
+            .iter()
+            .enumerate()
+            .skip(scroll_offset)
+            .take(visible_end - scroll_offset)
+        {
             let indent = "  ".repeat(node.depth);
             let prefix = if !node.skill.children.is_empty() {
                 if state.expanded.contains(&node.skill.id) {
@@ -893,13 +954,17 @@ fn draw_tree(f: &mut Frame, state: &TreeState) {
             let padded = pad_right(&name_str, 40);
 
             let name_style = if i == state.cursor {
-                let mut s = Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD);
+                let mut s = Style::default()
+                    .fg(Color::Magenta)
+                    .add_modifier(Modifier::BOLD);
                 if is_match {
                     s = s.add_modifier(Modifier::UNDERLINED);
                 }
                 s
             } else if is_match {
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default()
             };
@@ -907,10 +972,7 @@ fn draw_tree(f: &mut Frame, state: &TreeState) {
             let level_lbl = level_label(node.skill.level);
             let level_color = LEVEL_COLORS[level];
 
-            let mut spans = vec![
-                Span::styled(padded, name_style),
-                Span::raw("  "),
-            ];
+            let mut spans = vec![Span::styled(padded, name_style), Span::raw("  ")];
             // Level bar with color
             let filled = "█".repeat(level);
             let empty = "░".repeat(5 - level);
@@ -941,7 +1003,10 @@ fn draw_tree(f: &mut Frame, state: &TreeState) {
             ];
             if !state.search_query.is_empty() {
                 if state.search_matches.is_empty() {
-                    spans.push(Span::styled("  no matches", Style::default().fg(Color::Red)));
+                    spans.push(Span::styled(
+                        "  no matches",
+                        Style::default().fg(Color::Red),
+                    ));
                 } else {
                     spans.push(Span::styled(
                         format!("  {}/{}", state.search_idx + 1, state.search_matches.len()),
@@ -963,7 +1028,8 @@ fn draw_tree(f: &mut Frame, state: &TreeState) {
         }
     }
 
-    let paragraph = Paragraph::new(lines).block(Block::default().padding(ratatui::widgets::Padding::horizontal(2)));
+    let paragraph = Paragraph::new(lines)
+        .block(Block::default().padding(ratatui::widgets::Padding::horizontal(2)));
     f.render_widget(paragraph, area);
 }
 
@@ -971,7 +1037,9 @@ fn draw_level_help(f: &mut Frame, area: Rect) {
     let mut lines = Vec::new();
     lines.push(Line::from(Span::styled(
         "Skill Levels",
-        Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD),
     )));
     lines.push(Line::from(""));
 
@@ -984,7 +1052,10 @@ fn draw_level_help(f: &mut Frame, area: Rect) {
             Span::styled(filled, Style::default().fg(color)),
             Span::styled(empty, Style::default().fg(Color::DarkGray)),
             Span::raw(" "),
-            Span::styled(format!("{:<12}", label), Style::default().fg(color).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                format!("{:<12}", label),
+                Style::default().fg(color).add_modifier(Modifier::BOLD),
+            ),
             Span::raw(" "),
             Span::styled(LEVEL_DESCRIPTIONS[i], Style::default().fg(Color::DarkGray)),
         ];
@@ -992,9 +1063,13 @@ fn draw_level_help(f: &mut Frame, area: Rect) {
     }
 
     lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled("b Back q Quit", Style::default().fg(Color::DarkGray))));
+    lines.push(Line::from(Span::styled(
+        "b Back q Quit",
+        Style::default().fg(Color::DarkGray),
+    )));
 
-    let paragraph = Paragraph::new(lines).block(Block::default().padding(ratatui::widgets::Padding::horizontal(2)));
+    let paragraph = Paragraph::new(lines)
+        .block(Block::default().padding(ratatui::widgets::Padding::horizontal(2)));
     f.render_widget(paragraph, area);
 }
 
@@ -1018,7 +1093,12 @@ fn draw_detail(f: &mut Frame, state: &TreeState, area: Rect) {
     let empty = "░".repeat(5 - level);
     let color = LEVEL_COLORS[level];
     lines.push(Line::from(vec![
-        Span::styled(&skill.name, Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            &skill.name,
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::raw("    "),
         Span::styled(filled, Style::default().fg(color)),
         Span::styled(empty, Style::default().fg(Color::DarkGray)),
@@ -1030,7 +1110,10 @@ fn draw_detail(f: &mut Frame, state: &TreeState, area: Rect) {
     ]));
 
     if !skill.description.is_empty() {
-        lines.push(Line::from(Span::styled(&skill.description, Style::default().fg(Color::DarkGray))));
+        lines.push(Line::from(Span::styled(
+            &skill.description,
+            Style::default().fg(Color::DarkGray),
+        )));
     }
 
     if state.detail_decks.is_empty() && state.detail_scenarios.is_empty() {
@@ -1039,11 +1122,20 @@ fn draw_detail(f: &mut Frame, state: &TreeState, area: Rect) {
     } else if !has_children {
         lines.push(Line::from(""));
         if !state.detail_decks.is_empty() {
-            lines.push(Line::from(Span::styled("Decks", Style::default().add_modifier(Modifier::BOLD))));
+            lines.push(Line::from(Span::styled(
+                "Decks",
+                Style::default().add_modifier(Modifier::BOLD),
+            )));
             for (i, d) in state.detail_decks.iter().enumerate() {
-                let prefix = if i == state.detail_cursor { "  > " } else { "    " };
+                let prefix = if i == state.detail_cursor {
+                    "  > "
+                } else {
+                    "    "
+                };
                 let name_style = if i == state.detail_cursor {
-                    Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(Color::Magenta)
+                        .add_modifier(Modifier::BOLD)
                 } else {
                     Style::default()
                 };
@@ -1052,7 +1144,10 @@ fn draw_detail(f: &mut Frame, state: &TreeState, area: Rect) {
                 lines.push(Line::from(vec![
                     Span::styled(format!("{prefix}{}", d.name), name_style),
                     Span::raw("  "),
-                    Span::styled(format!("{} cards", d.card_count), Style::default().fg(Color::DarkGray)),
+                    Span::styled(
+                        format!("{} cards", d.card_count),
+                        Style::default().fg(Color::DarkGray),
+                    ),
                     Span::raw(" "),
                     Span::styled(cov, Style::default().fg(cov_color)),
                 ]));
@@ -1060,7 +1155,10 @@ fn draw_detail(f: &mut Frame, state: &TreeState, area: Rect) {
         }
         if !state.detail_scenarios.is_empty() {
             lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled("Scenarios", Style::default().add_modifier(Modifier::BOLD))));
+            lines.push(Line::from(Span::styled(
+                "Scenarios",
+                Style::default().add_modifier(Modifier::BOLD),
+            )));
             for (name, status) in &state.detail_scenarios {
                 let icon = status_icon(status);
                 lines.push(Line::from(format!("  {icon} {name}")));
@@ -1075,7 +1173,12 @@ fn draw_detail(f: &mut Frame, state: &TreeState, area: Rect) {
 
             lines.push(Line::from(""));
             lines.push(Line::from(vec![
-                Span::styled(&sec.name, Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    &sec.name,
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
                 Span::raw("  "),
                 Span::styled(filled, Style::default().fg(sec_color)),
                 Span::styled(empty, Style::default().fg(Color::DarkGray)),
@@ -1087,13 +1190,22 @@ fn draw_detail(f: &mut Frame, state: &TreeState, area: Rect) {
             ]));
 
             if sec.deck_count > 0 {
-                lines.push(Line::from(Span::styled("  Decks:", Style::default().fg(Color::DarkGray))));
+                lines.push(Line::from(Span::styled(
+                    "  Decks:",
+                    Style::default().fg(Color::DarkGray),
+                )));
                 for di in 0..sec.deck_count {
                     let idx = sec.deck_start + di;
                     let d = &state.detail_decks[idx];
-                    let prefix = if idx == state.detail_cursor { "    > " } else { "      " };
+                    let prefix = if idx == state.detail_cursor {
+                        "    > "
+                    } else {
+                        "      "
+                    };
                     let name_style = if idx == state.detail_cursor {
-                        Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)
+                        Style::default()
+                            .fg(Color::Magenta)
+                            .add_modifier(Modifier::BOLD)
                     } else {
                         Style::default()
                     };
@@ -1102,7 +1214,10 @@ fn draw_detail(f: &mut Frame, state: &TreeState, area: Rect) {
                     lines.push(Line::from(vec![
                         Span::styled(format!("{prefix}{}", d.name), name_style),
                         Span::raw("  "),
-                        Span::styled(format!("{} cards", d.card_count), Style::default().fg(Color::DarkGray)),
+                        Span::styled(
+                            format!("{} cards", d.card_count),
+                            Style::default().fg(Color::DarkGray),
+                        ),
                         Span::raw(" "),
                         Span::styled(cov, Style::default().fg(cov_color)),
                     ]));
@@ -1110,7 +1225,10 @@ fn draw_detail(f: &mut Frame, state: &TreeState, area: Rect) {
             }
 
             if !sec.scenarios.is_empty() {
-                lines.push(Line::from(Span::styled("  Scenarios:", Style::default().fg(Color::DarkGray))));
+                lines.push(Line::from(Span::styled(
+                    "  Scenarios:",
+                    Style::default().fg(Color::DarkGray),
+                )));
                 for (name, status) in &sec.scenarios {
                     let icon = status_icon(status);
                     lines.push(Line::from(format!("    {icon} {name}")));
@@ -1125,7 +1243,8 @@ fn draw_detail(f: &mut Frame, state: &TreeState, area: Rect) {
         Style::default().fg(Color::DarkGray),
     )));
 
-    let paragraph = Paragraph::new(lines).block(Block::default().padding(ratatui::widgets::Padding::horizontal(2)));
+    let paragraph = Paragraph::new(lines)
+        .block(Block::default().padding(ratatui::widgets::Padding::horizontal(2)));
     f.render_widget(paragraph, area);
 }
 
@@ -1137,7 +1256,9 @@ fn draw_review(f: &mut Frame, review: &ReviewState) {
         ReviewStage::DeckSelect => {
             lines.push(Line::from(Span::styled(
                 "Select a deck",
-                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
             )));
             lines.push(Line::from(Span::styled(
                 "j/k Navigate enter Select b Back q Quit",
@@ -1152,7 +1273,9 @@ fn draw_review(f: &mut Frame, review: &ReviewState) {
                 for (i, d) in review.decks.iter().enumerate() {
                     let prefix = if i == review.deck_cursor { "> " } else { "  " };
                     let name_style = if i == review.deck_cursor {
-                        Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)
+                        Style::default()
+                            .fg(Color::Magenta)
+                            .add_modifier(Modifier::BOLD)
                     } else {
                         Style::default()
                     };
@@ -1169,7 +1292,9 @@ fn draw_review(f: &mut Frame, review: &ReviewState) {
         ReviewStage::Done => {
             lines.push(Line::from(Span::styled(
                 "review",
-                Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
             )));
             lines.push(Line::from(""));
             if review.cards.is_empty() {
@@ -1189,7 +1314,10 @@ fn draw_review(f: &mut Frame, review: &ReviewState) {
                     Style::default().fg(Color::DarkGray),
                 )));
             } else {
-                lines.push(Line::from(Span::styled("q: quit", Style::default().fg(Color::DarkGray))));
+                lines.push(Line::from(Span::styled(
+                    "q: quit",
+                    Style::default().fg(Color::DarkGray),
+                )));
             }
         }
         ReviewStage::Review => {
@@ -1206,7 +1334,9 @@ fn draw_review(f: &mut Frame, review: &ReviewState) {
 
             lines.push(Line::from(Span::styled(
                 "review",
-                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
             )));
 
             // Pagination dots
@@ -1239,7 +1369,11 @@ fn draw_review(f: &mut Frame, review: &ReviewState) {
                 let is_cur = idx == review.card_cursor;
                 let cov = review.covered_ids.contains(&review.cards[idx].id);
                 let color = if is_cur {
-                    if cov { Color::Green } else { Color::White }
+                    if cov {
+                        Color::Green
+                    } else {
+                        Color::White
+                    }
                 } else if cov {
                     Color::LightGreen
                 } else {
@@ -1258,7 +1392,10 @@ fn draw_review(f: &mut Frame, review: &ReviewState) {
             lines.push(Line::from(dot_spans));
 
             // Progress
-            let is_covered = review.current_card().map(|c| review.covered_ids.contains(&c.id)).unwrap_or(false);
+            let is_covered = review
+                .current_card()
+                .map(|c| review.covered_ids.contains(&c.id))
+                .unwrap_or(false);
             let progress_style = if is_covered {
                 Style::default().fg(Color::Green)
             } else {
@@ -1288,11 +1425,15 @@ fn draw_review(f: &mut Frame, review: &ReviewState) {
                     for (i, choice) in card.choices.iter().enumerate() {
                         let selected = i == review.choice_cursor;
                         let style = if review.show_answer && card.correct_index == Some(i as i64) {
-                            Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+                            Style::default()
+                                .fg(Color::Green)
+                                .add_modifier(Modifier::BOLD)
                         } else if review.show_answer && selected {
                             Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)
                         } else if selected {
-                            Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)
+                            Style::default()
+                                .fg(Color::Magenta)
+                                .add_modifier(Modifier::BOLD)
                         } else {
                             Style::default()
                         };
@@ -1306,7 +1447,9 @@ fn draw_review(f: &mut Frame, review: &ReviewState) {
                     lines.push(Line::from(""));
                     lines.push(Line::from(Span::styled(
                         "Answer",
-                        Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+                        Style::default()
+                            .fg(Color::Green)
+                            .add_modifier(Modifier::BOLD),
                     )));
                     // Answer text: prefer correct choice if MCQ
                     let answer_text = if let Some(ci) = card.correct_index {
@@ -1318,7 +1461,10 @@ fn draw_review(f: &mut Frame, review: &ReviewState) {
                     } else {
                         card.answer.clone()
                     };
-                    lines.push(Line::from(Span::styled(answer_text, Style::default().fg(Color::Green))));
+                    lines.push(Line::from(Span::styled(
+                        answer_text,
+                        Style::default().fg(Color::Green),
+                    )));
 
                     if !card.extra.trim().is_empty() {
                         lines.push(Line::from(""));
@@ -1332,12 +1478,16 @@ fn draw_review(f: &mut Frame, review: &ReviewState) {
             let mut help = if effective == "mcq" {
                 "enter/space: reveal→next | j/k: choice | n/p: next/prev | N/P: jump 10 | f/m/a: mode | q: quit".to_string()
             } else {
-                "enter/space: reveal→next | n/p: next/prev | N/P: jump 10 | f/m/a: mode | q: quit".to_string()
+                "enter/space: reveal→next | n/p: next/prev | N/P: jump 10 | f/m/a: mode | q: quit"
+                    .to_string()
             };
             if review.decks.len() > 1 {
                 help.push_str(" | b: decks");
             }
-            lines.push(Line::from(Span::styled(help, Style::default().fg(Color::DarkGray))));
+            lines.push(Line::from(Span::styled(
+                help,
+                Style::default().fg(Color::DarkGray),
+            )));
         }
     }
 
