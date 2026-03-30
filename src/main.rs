@@ -7,16 +7,21 @@ use std::fs;
 use std::process;
 
 use clap::{Parser, Subcommand};
-use cli_core::{db_path, json, resolve_skills_dir, install, InstallOptions};
+use cli_core::{
+    db_path, install, json, resolve_default_skills_dirs, resolve_skills_dir, InstallOptions,
+};
 use serde::Deserialize;
 
-use store::{Card, Deck, Store, validate_level, validate_status};
+use store::{validate_level, validate_status, Card, Deck, Store};
 use tui_helpers::{level_bar, level_label};
 
 // --- CLI ---
 
 #[derive(Parser)]
-#[command(name = "skill-tree", about = "Unified learning CLI: skill tree + quiz decks + scenarios")]
+#[command(
+    name = "skill-tree",
+    about = "Unified learning CLI: skill tree + quiz decks + scenarios"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
@@ -463,11 +468,7 @@ fn format_updated_at(raw: &str) -> String {
     }
 }
 
-fn print_skill_links(
-    decks: &[Deck],
-    scenarios: &[store::Scenario],
-    indent: &str,
-) {
+fn print_skill_links(decks: &[Deck], scenarios: &[store::Scenario], indent: &str) {
     if !decks.is_empty() {
         println!("{indent}Decks:");
         for d in decks {
@@ -506,10 +507,7 @@ fn print_skill_tree(skills: &[store::Skill], depth: usize) {
     }
 }
 
-fn find_skill_by_name<'a>(
-    skills: &'a [store::Skill],
-    name: &str,
-) -> Option<&'a store::Skill> {
+fn find_skill_by_name<'a>(skills: &'a [store::Skill], name: &str) -> Option<&'a store::Skill> {
     for s in skills {
         if s.name.eq_ignore_ascii_case(name) {
             return Some(s);
@@ -613,18 +611,17 @@ fn run_skill(cmd: SkillCommands) -> Result<(), String> {
                 print_skill_tree(&skills, 0);
                 return Ok(());
             }
-            let pid = if parent_id > 0 {
-                Some(parent_id)
-            } else {
-                None
-            };
+            let pid = if parent_id > 0 { Some(parent_id) } else { None };
             let skills = st.list_skills(pid)?;
             for s in &skills {
                 println!("{}\t{}\t{}/5", s.id, s.name, s.level);
             }
             Ok(())
         }
-        SkillCommands::Show { id, json: json_flag } => {
+        SkillCommands::Show {
+            id,
+            json: json_flag,
+        } => {
             let st = Store::open()?;
             let skill = st.get_skill(id)?;
             if json_flag {
@@ -672,17 +669,23 @@ fn run_skill(cmd: SkillCommands) -> Result<(), String> {
             Ok(())
         }
         SkillCommands::Install { dest, force, link } => {
-            let dest_dir = resolve_skills_dir(dest.as_deref())
+            let dest_dirs = match dest.as_deref() {
+                Some(dest) => vec![resolve_skills_dir(Some(dest)).map_err(|e| e.to_string())?],
+                None => resolve_default_skills_dirs().map_err(|e| e.to_string())?,
+            };
+            let mut installed_paths = Vec::new();
+            for dest_dir in dest_dirs {
+                let path = install(&InstallOptions {
+                    src_dir: "skills/skill-tree".into(),
+                    dest_dir: dest_dir.to_string_lossy().into(),
+                    name: Some("skill-tree".into()),
+                    overwrite: force,
+                    link,
+                })
                 .map_err(|e| e.to_string())?;
-            let path = install(&InstallOptions {
-                src_dir: "skills/skill-tree".into(),
-                dest_dir: dest_dir.to_string_lossy().into(),
-                name: Some("skill-tree".into()),
-                overwrite: force,
-                link,
-            })
-            .map_err(|e| e.to_string())?;
-            println!("Installed skill to {}", path.display());
+                installed_paths.push(path.display().to_string());
+            }
+            println!("Installed skill to {}", installed_paths.join(", "));
             Ok(())
         }
     }
@@ -701,7 +704,10 @@ fn run_scenario(cmd: ScenarioCommands) -> Result<(), String> {
             println!("Created scenario {id}: {name}");
             Ok(())
         }
-        ScenarioCommands::List { status, json: json_flag } => {
+        ScenarioCommands::List {
+            status,
+            json: json_flag,
+        } => {
             let st = Store::open()?;
             let scenarios = st.list_scenarios(status.as_deref().unwrap_or(""))?;
             if json_flag {
@@ -713,7 +719,10 @@ fn run_scenario(cmd: ScenarioCommands) -> Result<(), String> {
             }
             Ok(())
         }
-        ScenarioCommands::Show { id, json: json_flag } => {
+        ScenarioCommands::Show {
+            id,
+            json: json_flag,
+        } => {
             let st = Store::open()?;
             let sc = st.get_scenario(id)?;
             if json_flag {
@@ -799,7 +808,9 @@ fn run_deck(cmd: DeckCommands) -> Result<(), String> {
                 println!("Created deck: {name}");
                 return Ok(());
             }
-            if (data.is_some() || file.is_some()) && (deck_name.is_some() || !description.is_empty()) {
+            if (data.is_some() || file.is_some())
+                && (deck_name.is_some() || !description.is_empty())
+            {
                 return Err("--deck-name/--description cannot be used with --data/--file".into());
             }
             let payload = read_payload(data.as_deref(), file.as_deref())?;
@@ -931,9 +942,7 @@ fn run_card(cmd: CardCommands) -> Result<(), String> {
 
             if data.is_some() || file.is_some() {
                 if question.is_some() || answer.is_some() {
-                    return Err(
-                        "--data/--file cannot be used with --question or --answer".into(),
-                    );
+                    return Err("--data/--file cannot be used with --question or --answer".into());
                 }
                 let payload = read_payload(data.as_deref(), file.as_deref())?;
                 let raw: Vec<RawCardInput> =
@@ -1070,8 +1079,7 @@ fn run_tree_command() -> Result<(), String> {
     for deck in &all_decks {
         cards_by_deck.insert(deck.id, st.list_cards(deck.id, 200)?);
     }
-    tui::run_tree(ctx.skills, all_decks, cards_by_deck, &st)
-        .map_err(|e| e.to_string())
+    tui::run_tree(ctx.skills, all_decks, cards_by_deck, &st).map_err(|e| e.to_string())
 }
 
 fn run_skill_review(skill_name: &str, mode_raw: &str, limit: i64) -> Result<(), String> {
@@ -1096,8 +1104,7 @@ fn run_skill_review(skill_name: &str, mode_raw: &str, limit: i64) -> Result<(), 
     };
     let mut cards_by_deck = HashMap::new();
     cards_by_deck.insert(-1i64, cards);
-    tui::run_review(vec![deck], cards_by_deck, 0, mode, true, &st)
-        .map_err(|e| e.to_string())
+    tui::run_review(vec![deck], cards_by_deck, 0, mode, true, &st).map_err(|e| e.to_string())
 }
 
 fn run_review_session(deck_query: &str, mode_raw: &str, limit: i64) -> Result<(), String> {
@@ -1119,6 +1126,13 @@ fn run_review_session(deck_query: &str, mode_raw: &str, limit: i64) -> Result<()
             }
         }
     }
-    tui::run_review(decks, cards_by_deck, selected_index, mode, start_in_review, &st)
-        .map_err(|e| e.to_string())
+    tui::run_review(
+        decks,
+        cards_by_deck,
+        selected_index,
+        mode,
+        start_in_review,
+        &st,
+    )
+    .map_err(|e| e.to_string())
 }

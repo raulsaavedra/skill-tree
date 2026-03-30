@@ -39,6 +39,8 @@ Then install the bundled `skill-tree` skill so your agent can use the stored dat
 skill-tree skill install
 ```
 
+By default this installs into the default skill directories for your local agent setup.
+
 Use `--link` to install the skill as a symlink to the source directory:
 
 ```bash
