@@ -393,11 +393,32 @@ fn leaf_info(skill: &Skill) -> String {
 }
 
 fn pad_right(s: &str, width: usize) -> String {
-    if s.len() >= width {
+    let len = s.chars().count();
+    if len >= width {
         s.to_string()
     } else {
-        format!("{}{}", s, " ".repeat(width - s.len()))
+        format!("{}{}", s, " ".repeat(width - len))
     }
+}
+
+fn truncate_with_ellipsis(s: &str, width: usize) -> String {
+    let len = s.chars().count();
+    if len <= width {
+        return s.to_string();
+    }
+    if width == 0 {
+        return String::new();
+    }
+    if width == 1 {
+        return "…".to_string();
+    }
+
+    let mut out = String::with_capacity(width);
+    for ch in s.chars().take(width - 1) {
+        out.push(ch);
+    }
+    out.push('…');
+    out
 }
 
 // --- TUI entry points ---
@@ -970,7 +991,6 @@ fn draw_tree(f: &mut Frame, state: &TreeState) {
             Style::default().fg(Color::DarkGray),
         )));
     } else {
-        // Determine visible window for scrolling
         let max_visible = area.height.saturating_sub(5) as usize; // header + footer + padding
         let scroll_offset = if flat_nodes.len() > max_visible && state.cursor >= max_visible {
             (state.cursor - max_visible + 1).min(flat_nodes.len().saturating_sub(max_visible))
@@ -978,6 +998,8 @@ fn draw_tree(f: &mut Frame, state: &TreeState) {
             0
         };
         let visible_end = (scroll_offset + max_visible).min(flat_nodes.len());
+        let base_name_col_width = 40;
+        let child_level_offset = 6;
 
         for (i, node) in flat_nodes
             .iter()
@@ -1000,8 +1022,12 @@ fn draw_tree(f: &mut Frame, state: &TreeState) {
             let is_match = state.match_set.contains(&node.skill.id);
             let info = leaf_info(&node.skill);
 
-            let name_str = format!("{cursor_str}{indent}{prefix}{}", node.skill.name);
-            let padded = pad_right(&name_str, 40);
+            let name_prefix = format!("{cursor_str}{indent}{prefix}");
+            let name_col_width = base_name_col_width + (node.depth * child_level_offset);
+            let name_width = name_col_width.saturating_sub(name_prefix.chars().count());
+            let fitted_name = truncate_with_ellipsis(&node.skill.name, name_width);
+            let fitted = format!("{name_prefix}{fitted_name}");
+            let padded = pad_right(&fitted, name_col_width);
 
             let name_style = if i == state.cursor {
                 let mut s = Style::default()
