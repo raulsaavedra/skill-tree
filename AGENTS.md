@@ -41,4 +41,4 @@ cargo run -- --help      # run directly
 - **Skills** -- hierarchical tree (parent_id), level 0-5, linked to decks and scenarios via junction tables
 - **Decks** -- contain cards, linked to skills via `deck_skills`, track coverage
 - **Cards** -- belong to a deck, support question/answer/extra/choices/correct_index/tags
-- **Scenarios** -- track hands-on work, linked to skills via `scenario_skills`, status progression (planned, in_progress, completed, abandoned)
+- **Scenarios** -- track hands-on work, linked to skills via `scenario_skills`, support ordered plan steps, and keep scenario status progression (planned, in_progress, completed, abandoned)

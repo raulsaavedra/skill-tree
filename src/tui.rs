@@ -11,7 +11,7 @@ use ratatui::prelude::*;
 use ratatui::widgets::{Block, Paragraph, Wrap};
 use ratatui::Terminal;
 
-use crate::store::{Card, Deck, Skill, Store};
+use crate::store::{Card, Deck, ScenarioDetail, Skill, Store};
 use crate::tui_helpers::*;
 
 // --- Types ---
@@ -27,7 +27,7 @@ struct DetailSection {
     level: i64,
     deck_start: usize,
     deck_count: usize,
-    scenarios: Vec<(String, String)>,
+    scenarios: Vec<ScenarioDetail>,
 }
 
 #[derive(PartialEq, Clone, Copy)]
@@ -161,7 +161,7 @@ struct TreeState {
     detail_cursor: usize,
     detail_decks: Vec<Deck>,
     detail_sections: Vec<DetailSection>,
-    detail_scenarios: Vec<(String, String)>,
+    detail_scenarios: Vec<ScenarioDetail>,
     // Search
     searching: bool,
     search_query: String,
@@ -201,54 +201,46 @@ impl TreeState {
         nodes
     }
 
-    fn load_detail_data(&mut self, skill: &Skill) {
+    fn load_detail_data(&mut self, skill: &Skill, store: &Store) {
         let mut d_decks = Vec::new();
         let mut sections = Vec::new();
         let mut d_scenarios = Vec::new();
 
         if !skill.decks.is_empty() || !skill.scenarios.is_empty() {
+            let scenarios: Vec<ScenarioDetail> = skill
+                .scenarios
+                .iter()
+                .filter_map(|scenario| store.get_scenario_detail(scenario.id).ok())
+                .collect();
             sections.push(DetailSection {
                 name: skill.name.clone(),
                 level: skill.level,
                 deck_start: d_decks.len(),
                 deck_count: skill.decks.len(),
-                scenarios: skill
-                    .scenarios
-                    .iter()
-                    .map(|s| (s.name.clone(), s.status.clone()))
-                    .collect(),
+                scenarios: scenarios.clone(),
             });
             d_decks.extend(skill.decks.clone());
-            d_scenarios.extend(
-                skill
-                    .scenarios
-                    .iter()
-                    .map(|s| (s.name.clone(), s.status.clone())),
-            );
+            d_scenarios.extend(scenarios);
         }
 
         for child in &skill.children {
             if child.decks.is_empty() && child.scenarios.is_empty() {
                 continue;
             }
+            let scenarios: Vec<ScenarioDetail> = child
+                .scenarios
+                .iter()
+                .filter_map(|scenario| store.get_scenario_detail(scenario.id).ok())
+                .collect();
             sections.push(DetailSection {
                 name: child.name.clone(),
                 level: child.level,
                 deck_start: d_decks.len(),
                 deck_count: child.decks.len(),
-                scenarios: child
-                    .scenarios
-                    .iter()
-                    .map(|s| (s.name.clone(), s.status.clone()))
-                    .collect(),
+                scenarios: scenarios.clone(),
             });
             d_decks.extend(child.decks.clone());
-            d_scenarios.extend(
-                child
-                    .scenarios
-                    .iter()
-                    .map(|s| (s.name.clone(), s.status.clone())),
-            );
+            d_scenarios.extend(scenarios);
         }
 
         self.detail_decks = d_decks;
@@ -674,7 +666,7 @@ fn run_tree_loop(
                 KeyCode::Char('d') => {
                     if state.cursor < flat_nodes.len() {
                         let skill = flat_nodes[state.cursor].skill.clone();
-                        state.load_detail_data(&skill);
+                        state.load_detail_data(&skill, store);
                         state.selected = Some(skill);
                         state.stage = AppStage::Detail;
                     }
@@ -719,7 +711,7 @@ fn run_tree_loop(
                             }
                         } else {
                             let skill = node.skill.clone();
-                            state.load_detail_data(&skill);
+                            state.load_detail_data(&skill, store);
                             state.selected = Some(skill);
                             state.stage = AppStage::Detail;
                         }
@@ -1073,6 +1065,35 @@ fn draw_level_help(f: &mut Frame, area: Rect) {
     f.render_widget(paragraph, area);
 }
 
+fn push_scenario_lines(lines: &mut Vec<Line>, scenario: &ScenarioDetail, indent: &str) {
+    let icon = status_icon(&scenario.status);
+    lines.push(Line::from(vec![
+        Span::raw(format!("{indent}{icon} {}", scenario.name)),
+        Span::raw("  "),
+        Span::styled(
+            format!(
+                "{}/{} complete",
+                scenario.progress.completed_steps, scenario.progress.total_steps
+            ),
+            Style::default().fg(Color::DarkGray),
+        ),
+    ]));
+
+    for step in &scenario.steps {
+        let step_icon = status_icon(&step.status);
+        lines.push(Line::from(format!(
+            "{indent}  {step_icon} {}. {}",
+            step.position, step.title
+        )));
+        if !step.description.is_empty() {
+            lines.push(Line::from(Span::styled(
+                format!("{indent}      {}", step.description),
+                Style::default().fg(Color::DarkGray),
+            )));
+        }
+    }
+}
+
 fn draw_detail(f: &mut Frame, state: &TreeState, area: Rect) {
     let skill = match &state.selected {
         Some(s) => s,
@@ -1159,9 +1180,8 @@ fn draw_detail(f: &mut Frame, state: &TreeState, area: Rect) {
                 "Scenarios",
                 Style::default().add_modifier(Modifier::BOLD),
             )));
-            for (name, status) in &state.detail_scenarios {
-                let icon = status_icon(status);
-                lines.push(Line::from(format!("  {icon} {name}")));
+            for scenario in &state.detail_scenarios {
+                push_scenario_lines(&mut lines, scenario, "  ");
             }
         }
     } else {
@@ -1229,9 +1249,8 @@ fn draw_detail(f: &mut Frame, state: &TreeState, area: Rect) {
                     "  Scenarios:",
                     Style::default().fg(Color::DarkGray),
                 )));
-                for (name, status) in &sec.scenarios {
-                    let icon = status_icon(status);
-                    lines.push(Line::from(format!("    {icon} {name}")));
+                for scenario in &sec.scenarios {
+                    push_scenario_lines(&mut lines, scenario, "    ");
                 }
             }
         }

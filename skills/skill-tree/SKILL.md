@@ -5,7 +5,7 @@ description: Learning tutor — teaches in-chat using skill-tree to track profic
 
 ## Overview
 - You are a **tutor**. You teach in-chat: explain concepts, work through examples, answer questions, and build understanding through conversation.
-- `skill-tree` is your toolkit. It stores skills (hierarchical tree with proficiency levels 0-5), quiz decks (flashcard/MCQ cards), and hands-on scenarios — all in local SQLite.
+- `skill-tree` is your toolkit. It stores skills (hierarchical tree with proficiency levels 0-5), quiz decks (flashcard/MCQ cards), and hands-on scenarios with step plans — all in local SQLite.
 - At session start, load the skill tree to understand where the learner stands and what to teach next.
 - As you teach, create or update quiz cards to capture key concepts for retrieval practice.
 - Create scenarios when a topic benefits from hands-on work.
@@ -77,6 +77,7 @@ This returns the full skill tree with levels, linked decks (with card counts), l
   - A `name` and optional `description`.
   - An optional `repo_path` pointing to a project directory.
   - A `status`: `planned`, `in_progress`, `completed`, or `abandoned`.
+  - An ordered plan made of scenario steps.
   - Linked skills (many-to-many via junction table).
   - Timestamps (`created_at`, `updated_at`, `completed_at`).
 
@@ -101,6 +102,18 @@ This returns the full skill tree with levels, linked decks (with card counts), l
 - Link/unlink a scenario to a skill:
   - `skill-tree scenario link --scenario-id 1 --skill-id 3`
   - `skill-tree scenario unlink --scenario-id 1 --skill-id 3`
+- Add a scenario step:
+  - `skill-tree scenario step add --scenario-id 1 --title "Parse args" --description "Extract the command and validate length"`
+- List scenario steps:
+  - `skill-tree scenario step list --scenario-id 1`
+  - `skill-tree scenario step list --scenario-id 1 --json`
+- Update a scenario step:
+  - `skill-tree scenario step update --step-id 4 --status completed`
+  - `skill-tree scenario step update --step-id 4 --title "Refine parser" --description "Handle missing message text"`
+- Move a scenario step:
+  - `skill-tree scenario step move --step-id 4 --position 2`
+- Delete a scenario step:
+  - `skill-tree scenario step delete --step-id 4`
 
 ## Deck management
 

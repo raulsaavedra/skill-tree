@@ -4,7 +4,7 @@
 
 A good way to think about it is as a tutoring system. The agent is the tutor. The learner brings the topic, asks questions, and refines their understanding in conversation. The tutor then uses `skill-tree` to keep track of what is being learned, create material to review, assign practice through the TUI, and carry the progress forward across sessions.
 
-`skill-tree` keeps track of skills, quiz decks, hands-on scenarios, and proficiency levels. Those are the pieces the agent uses to understand what the learner is working on, and they are also what the learner sees in the TUI when reviewing progress or practicing retrieval.
+`skill-tree` keeps track of skills, quiz decks, hands-on scenarios, scenario plans, and proficiency levels. Those are the pieces the agent uses to understand what the learner is working on, and they are also what the learner sees in the TUI when reviewing progress or practicing retrieval.
 
 ## How It Works In Practice
 

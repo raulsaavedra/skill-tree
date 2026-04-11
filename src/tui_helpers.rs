@@ -32,6 +32,8 @@ pub fn status_icon(status: &str) -> &'static str {
         "planned" => "○",
         "in_progress" => "◉",
         "completed" => "✓",
+        "blocked" => "!",
+        "skipped" => "»",
         "abandoned" => "✗",
         _ => "○",
     }

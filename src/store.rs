@@ -36,6 +36,44 @@ pub struct Scenario {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct ScenarioStep {
+    pub id: i64,
+    pub scenario_id: i64,
+    pub position: i64,
+    pub title: String,
+    pub description: String,
+    pub status: String,
+    pub created_at: String,
+    pub updated_at: String,
+    pub completed_at: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ScenarioProgress {
+    pub total_steps: i64,
+    pub planned_steps: i64,
+    pub in_progress_steps: i64,
+    pub completed_steps: i64,
+    pub blocked_steps: i64,
+    pub skipped_steps: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ScenarioDetail {
+    pub id: i64,
+    pub name: String,
+    pub description: String,
+    pub repo_path: String,
+    pub status: String,
+    pub skills: Vec<Skill>,
+    pub steps: Vec<ScenarioStep>,
+    pub progress: ScenarioProgress,
+    pub created_at: String,
+    pub updated_at: String,
+    pub completed_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct Deck {
     pub id: i64,
     pub name: String,
@@ -60,7 +98,7 @@ pub struct Card {
 #[derive(Debug, Clone, Serialize)]
 pub struct Context {
     pub skills: Vec<Skill>,
-    pub active_scenarios: Vec<Scenario>,
+    pub active_scenarios: Vec<ScenarioDetail>,
 }
 
 // --- Validation ---
@@ -74,6 +112,7 @@ pub fn validate_level(level: i64) -> Result<(), String> {
 }
 
 const VALID_STATUSES: &[&str] = &["planned", "in_progress", "completed", "abandoned"];
+const VALID_STEP_STATUSES: &[&str] = &["planned", "in_progress", "completed", "blocked", "skipped"];
 
 pub fn validate_status(status: &str) -> Result<(), String> {
     if VALID_STATUSES.contains(&status) {
@@ -81,6 +120,16 @@ pub fn validate_status(status: &str) -> Result<(), String> {
     } else {
         Err(format!(
             "status must be one of: planned, in_progress, completed, abandoned; got \"{status}\""
+        ))
+    }
+}
+
+pub fn validate_step_status(status: &str) -> Result<(), String> {
+    if VALID_STEP_STATUSES.contains(&status) {
+        Ok(())
+    } else {
+        Err(format!(
+            "step status must be one of: planned, in_progress, completed, blocked, skipped; got \"{status}\""
         ))
     }
 }
@@ -184,6 +233,18 @@ fn migrate(db: &Connection) -> Result<(), String> {
             updated_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
             completed_at DATETIME
         )",
+        "CREATE TABLE IF NOT EXISTS scenario_steps (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            scenario_id  INTEGER NOT NULL REFERENCES scenarios(id) ON DELETE CASCADE,
+            position     INTEGER NOT NULL,
+            title        TEXT NOT NULL,
+            description  TEXT,
+            status       TEXT NOT NULL DEFAULT 'planned',
+            created_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
+            completed_at DATETIME,
+            UNIQUE (scenario_id, position)
+        )",
         "CREATE TABLE IF NOT EXISTS scenario_skills (
             scenario_id INTEGER NOT NULL REFERENCES scenarios(id) ON DELETE CASCADE,
             skill_id    INTEGER NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
@@ -214,6 +275,10 @@ fn migrate(db: &Connection) -> Result<(), String> {
         FOR EACH ROW BEGIN
             UPDATE scenarios SET updated_at = CURRENT_TIMESTAMP WHERE id = OLD.id;
         END",
+        "CREATE TRIGGER IF NOT EXISTS scenario_steps_updated_at AFTER UPDATE ON scenario_steps
+        FOR EACH ROW BEGIN
+            UPDATE scenario_steps SET updated_at = CURRENT_TIMESTAMP WHERE id = OLD.id;
+        END",
     ];
     for stmt in &stmts {
         db.execute_batch(stmt)
@@ -230,6 +295,54 @@ pub struct Store {
     pub path: PathBuf,
 }
 
+fn scenario_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Scenario> {
+    Ok(Scenario {
+        id: row.get(0)?,
+        name: row.get(1)?,
+        description: row.get(2)?,
+        repo_path: row.get(3)?,
+        status: row.get(4)?,
+        skills: vec![],
+        created_at: row.get(5)?,
+        updated_at: row.get(6)?,
+        completed_at: row.get(7)?,
+    })
+}
+
+fn scenario_step_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ScenarioStep> {
+    Ok(ScenarioStep {
+        id: row.get(0)?,
+        scenario_id: row.get(1)?,
+        position: row.get(2)?,
+        title: row.get(3)?,
+        description: row.get(4)?,
+        status: row.get(5)?,
+        created_at: row.get(6)?,
+        updated_at: row.get(7)?,
+        completed_at: row.get(8)?,
+    })
+}
+
+fn scenario_progress(steps: &[ScenarioStep]) -> ScenarioProgress {
+    let mut progress = ScenarioProgress {
+        total_steps: steps.len() as i64,
+        ..ScenarioProgress::default()
+    };
+
+    for step in steps {
+        match step.status.as_str() {
+            "planned" => progress.planned_steps += 1,
+            "in_progress" => progress.in_progress_steps += 1,
+            "completed" => progress.completed_steps += 1,
+            "blocked" => progress.blocked_steps += 1,
+            "skipped" => progress.skipped_steps += 1,
+            _ => {}
+        }
+    }
+
+    progress
+}
+
 impl Store {
     pub fn open() -> Result<Store, String> {
         migrate_old_data_dir();
@@ -241,6 +354,93 @@ impl Store {
             migrate: Some(migrate),
         })?;
         Ok(Store { db, path })
+    }
+
+    fn with_transaction<T, F>(&self, f: F) -> Result<T, String>
+    where
+        F: FnOnce(&Store) -> Result<T, String>,
+    {
+        self.db
+            .execute_batch("BEGIN IMMEDIATE")
+            .map_err(|e| e.to_string())?;
+        match f(self) {
+            Ok(value) => {
+                if let Err(e) = self.db.execute_batch("COMMIT") {
+                    let _ = self.db.execute_batch("ROLLBACK");
+                    return Err(e.to_string());
+                }
+                Ok(value)
+            }
+            Err(e) => {
+                let _ = self.db.execute_batch("ROLLBACK");
+                Err(e)
+            }
+        }
+    }
+
+    fn ensure_scenario_exists(&self, scenario_id: i64) -> Result<(), String> {
+        self.db
+            .query_row(
+                "SELECT 1 FROM scenarios WHERE id = ?1",
+                params![scenario_id],
+                |_| Ok(()),
+            )
+            .map_err(|_| format!("scenario {scenario_id} not found"))
+    }
+
+    fn scenario_step_ids(&self, scenario_id: i64) -> Result<Vec<i64>, String> {
+        let mut stmt = self
+            .db
+            .prepare(
+                "SELECT id FROM scenario_steps WHERE scenario_id = ?1 ORDER BY position ASC, id ASC",
+            )
+            .map_err(|e| e.to_string())?;
+        let ids = stmt
+            .query_map(params![scenario_id], |row| row.get::<_, i64>(0))
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+        Ok(ids)
+    }
+
+    fn renumber_scenario_steps(&self, ordered_ids: &[i64]) -> Result<(), String> {
+        for (idx, step_id) in ordered_ids.iter().enumerate() {
+            self.db
+                .execute(
+                    "UPDATE scenario_steps SET position = ?1 WHERE id = ?2",
+                    params![-((idx as i64) + 1), step_id],
+                )
+                .map_err(|e| e.to_string())?;
+        }
+        for (idx, step_id) in ordered_ids.iter().enumerate() {
+            self.db
+                .execute(
+                    "UPDATE scenario_steps SET position = ?1 WHERE id = ?2",
+                    params![idx as i64 + 1, step_id],
+                )
+                .map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    }
+
+    fn build_scenario_detail(&self, mut scenario: Scenario) -> Result<ScenarioDetail, String> {
+        scenario.skills = self.skills_for_scenario(scenario.id)?;
+        let steps = self.list_scenario_steps(scenario.id)?;
+        let progress = scenario_progress(&steps);
+
+        Ok(ScenarioDetail {
+            id: scenario.id,
+            name: scenario.name,
+            description: scenario.description,
+            repo_path: scenario.repo_path,
+            status: scenario.status,
+            skills: scenario.skills,
+            steps,
+            progress,
+            created_at: scenario.created_at,
+            updated_at: scenario.updated_at,
+            completed_at: scenario.completed_at,
+        })
     }
 
     // --- Skill CRUD ---
@@ -433,19 +633,7 @@ impl Store {
             )
             .map_err(|e| e.to_string())?;
         skill.scenarios = sstmt
-            .query_map(params![skill.id], |row| {
-                Ok(Scenario {
-                    id: row.get(0)?,
-                    name: row.get(1)?,
-                    description: row.get(2)?,
-                    repo_path: row.get(3)?,
-                    status: row.get(4)?,
-                    skills: vec![],
-                    created_at: row.get(5)?,
-                    updated_at: row.get(6)?,
-                    completed_at: row.get(7)?,
-                })
-            })
+            .query_map(params![skill.id], scenario_from_row)
             .map_err(|e| e.to_string())?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| e.to_string())?;
@@ -642,26 +830,19 @@ impl Store {
             )
             .map_err(|e| e.to_string())?;
         let active: Vec<Scenario> = stmt
-            .query_map([], |row| {
-                Ok(Scenario {
-                    id: row.get(0)?,
-                    name: row.get(1)?,
-                    description: row.get(2)?,
-                    repo_path: row.get(3)?,
-                    status: row.get(4)?,
-                    skills: vec![],
-                    created_at: row.get(5)?,
-                    updated_at: row.get(6)?,
-                    completed_at: row.get(7)?,
-                })
-            })
+            .query_map([], scenario_from_row)
             .map_err(|e| e.to_string())?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| e.to_string())?;
 
+        let active_scenarios = active
+            .into_iter()
+            .map(|scenario| self.build_scenario_detail(scenario))
+            .collect::<Result<Vec<_>, _>>()?;
+
         Ok(Context {
             skills: tree,
-            active_scenarios: active,
+            active_scenarios,
         })
     }
 
@@ -1084,19 +1265,7 @@ impl Store {
                 )
                 .map_err(|e| e.to_string())?;
             let rows = stmt
-                .query_map([], |row| {
-                    Ok(Scenario {
-                        id: row.get(0)?,
-                        name: row.get(1)?,
-                        description: row.get(2)?,
-                        repo_path: row.get(3)?,
-                        status: row.get(4)?,
-                        skills: vec![],
-                        created_at: row.get(5)?,
-                        updated_at: row.get(6)?,
-                        completed_at: row.get(7)?,
-                    })
-                })
+                .query_map([], scenario_from_row)
                 .map_err(|e| e.to_string())?;
             rows.collect::<Result<Vec<_>, _>>()
                 .map_err(|e| e.to_string())?
@@ -1110,19 +1279,7 @@ impl Store {
                 )
                 .map_err(|e| e.to_string())?;
             let rows = stmt
-                .query_map(params![status], |row| {
-                    Ok(Scenario {
-                        id: row.get(0)?,
-                        name: row.get(1)?,
-                        description: row.get(2)?,
-                        repo_path: row.get(3)?,
-                        status: row.get(4)?,
-                        skills: vec![],
-                        created_at: row.get(5)?,
-                        updated_at: row.get(6)?,
-                        completed_at: row.get(7)?,
-                    })
-                })
+                .query_map(params![status], scenario_from_row)
                 .map_err(|e| e.to_string())?;
             rows.collect::<Result<Vec<_>, _>>()
                 .map_err(|e| e.to_string())?
@@ -1143,22 +1300,34 @@ impl Store {
             )
             .map_err(|e| e.to_string())?;
         let mut sc: Scenario = stmt
-            .query_row(params![id], |row| {
-                Ok(Scenario {
-                    id: row.get(0)?,
-                    name: row.get(1)?,
-                    description: row.get(2)?,
-                    repo_path: row.get(3)?,
-                    status: row.get(4)?,
-                    skills: vec![],
-                    created_at: row.get(5)?,
-                    updated_at: row.get(6)?,
-                    completed_at: row.get(7)?,
-                })
-            })
+            .query_row(params![id], scenario_from_row)
             .map_err(|_| format!("scenario {id} not found"))?;
         sc.skills = self.skills_for_scenario(id)?;
         Ok(sc)
+    }
+
+    pub fn get_scenario_detail(&self, id: i64) -> Result<ScenarioDetail, String> {
+        let scenario = self.get_scenario(id)?;
+        self.build_scenario_detail(scenario)
+    }
+
+    pub fn list_scenario_steps(&self, scenario_id: i64) -> Result<Vec<ScenarioStep>, String> {
+        let mut stmt = self
+            .db
+            .prepare(
+                "SELECT id, scenario_id, position, title, COALESCE(description,'') as description,
+                        status, created_at, updated_at, COALESCE(completed_at,'') as completed_at
+                 FROM scenario_steps
+                 WHERE scenario_id = ?1
+                 ORDER BY position ASC, id ASC",
+            )
+            .map_err(|e| e.to_string())?;
+        let steps = stmt
+            .query_map(params![scenario_id], scenario_step_from_row)
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+        Ok(steps)
     }
 
     pub fn update_scenario(
@@ -1216,6 +1385,49 @@ impl Store {
         Ok(())
     }
 
+    pub fn create_scenario_step(
+        &self,
+        scenario_id: i64,
+        title: &str,
+        description: &str,
+        position: Option<i64>,
+        status: &str,
+    ) -> Result<i64, String> {
+        validate_step_status(status)?;
+        self.with_transaction(|st| {
+            st.ensure_scenario_exists(scenario_id)?;
+
+            let mut step_ids = st.scenario_step_ids(scenario_id)?;
+            let insert_position = position.unwrap_or(step_ids.len() as i64 + 1);
+            if insert_position < 1 || insert_position > step_ids.len() as i64 + 1 {
+                return Err(format!(
+                    "position must be between 1 and {}",
+                    step_ids.len() + 1
+                ));
+            }
+
+            let desc: Option<&str> = if description.is_empty() {
+                None
+            } else {
+                Some(description)
+            };
+
+            st.db
+                .execute(
+                    "INSERT INTO scenario_steps(scenario_id, position, title, description, status, completed_at)
+                     VALUES(?1, ?2, ?3, ?4, ?5, CASE WHEN ?5 = 'completed' THEN CURRENT_TIMESTAMP ELSE NULL END)",
+                    params![scenario_id, step_ids.len() as i64 + 1, title, desc, status],
+                )
+                .map_err(|e| e.to_string())?;
+            let step_id = st.db.last_insert_rowid();
+
+            step_ids.insert((insert_position - 1) as usize, step_id);
+            st.renumber_scenario_steps(&step_ids)?;
+
+            Ok(step_id)
+        })
+    }
+
     pub fn delete_scenario(&self, id: i64) -> Result<(), String> {
         let changes = self
             .db
@@ -1225,6 +1437,112 @@ impl Store {
             return Err(format!("scenario {id} not found"));
         }
         Ok(())
+    }
+
+    pub fn update_scenario_step(
+        &self,
+        id: i64,
+        title: Option<&str>,
+        description: Option<&str>,
+        status: Option<&str>,
+    ) -> Result<(), String> {
+        if let Some(s) = status {
+            validate_step_status(s)?;
+        }
+
+        let mut sets = Vec::new();
+        let mut args: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+
+        if let Some(t) = title {
+            sets.push("title = ?");
+            args.push(Box::new(t.to_string()));
+        }
+        if let Some(d) = description {
+            sets.push("description = ?");
+            let value: Option<String> = if d.is_empty() {
+                None
+            } else {
+                Some(d.to_string())
+            };
+            args.push(Box::new(value));
+        }
+        if let Some(s) = status {
+            sets.push("status = ?");
+            args.push(Box::new(s.to_string()));
+            if s == "completed" {
+                sets.push("completed_at = CURRENT_TIMESTAMP");
+            } else {
+                sets.push("completed_at = NULL");
+            }
+        }
+        if sets.is_empty() {
+            return Ok(());
+        }
+
+        args.push(Box::new(id));
+        let query = format!("UPDATE scenario_steps SET {} WHERE id = ?", sets.join(", "));
+        let params: Vec<&dyn rusqlite::types::ToSql> = args.iter().map(|a| a.as_ref()).collect();
+        let changes = self
+            .db
+            .execute(&query, params.as_slice())
+            .map_err(|e| e.to_string())?;
+        if changes == 0 {
+            return Err(format!("scenario step {id} not found"));
+        }
+        Ok(())
+    }
+
+    pub fn move_scenario_step(&self, id: i64, position: i64) -> Result<(), String> {
+        if position < 1 {
+            return Err("position must be at least 1".into());
+        }
+
+        self.with_transaction(|st| {
+            let (scenario_id, current_position): (i64, i64) = st
+                .db
+                .query_row(
+                    "SELECT scenario_id, position FROM scenario_steps WHERE id = ?1",
+                    params![id],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .map_err(|_| format!("scenario step {id} not found"))?;
+
+            let mut step_ids = st.scenario_step_ids(scenario_id)?;
+            let max_position = step_ids.len() as i64;
+            if position > max_position {
+                return Err(format!("position must be between 1 and {max_position}"));
+            }
+            if position == current_position {
+                return Ok(());
+            }
+
+            let current_index = (current_position - 1) as usize;
+            let step_id = step_ids.remove(current_index);
+            step_ids.insert((position - 1) as usize, step_id);
+            st.renumber_scenario_steps(&step_ids)?;
+            Ok(())
+        })
+    }
+
+    pub fn delete_scenario_step(&self, id: i64) -> Result<(), String> {
+        self.with_transaction(|st| {
+            let scenario_id: i64 = st
+                .db
+                .query_row(
+                    "SELECT scenario_id FROM scenario_steps WHERE id = ?1",
+                    params![id],
+                    |row| row.get(0),
+                )
+                .map_err(|_| format!("scenario step {id} not found"))?;
+
+            st.db
+                .execute("DELETE FROM scenario_steps WHERE id = ?1", params![id])
+                .map_err(|e| e.to_string())?;
+
+            let step_ids = st.scenario_step_ids(scenario_id)?;
+            st.renumber_scenario_steps(&step_ids)?;
+            Ok(())
+        })
     }
 
     fn skills_for_scenario(&self, scenario_id: i64) -> Result<Vec<Skill>, String> {
@@ -1549,4 +1867,86 @@ fn build_tree(all: Vec<Skill>) -> Vec<Skill> {
         .iter()
         .map(|&id| build_subtree(id, &mut by_id, &child_map))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_store() -> Store {
+        let db = Connection::open_in_memory().unwrap();
+        migrate(&db).unwrap();
+        Store {
+            db,
+            path: PathBuf::from(":memory:"),
+        }
+    }
+
+    #[test]
+    fn scenario_steps_insert_in_order_and_report_progress() {
+        let st = test_store();
+        let scenario_id = st.create_scenario("Rust lesson", "", "", &[]).unwrap();
+
+        st.create_scenario_step(scenario_id, "Step 1", "", None, "planned")
+            .unwrap();
+        st.create_scenario_step(scenario_id, "Step 3", "", None, "blocked")
+            .unwrap();
+        st.create_scenario_step(scenario_id, "Step 2", "", Some(2), "in_progress")
+            .unwrap();
+
+        let steps = st.list_scenario_steps(scenario_id).unwrap();
+        let titles: Vec<&str> = steps.iter().map(|s| s.title.as_str()).collect();
+        let positions: Vec<i64> = steps.iter().map(|s| s.position).collect();
+
+        assert_eq!(titles, vec!["Step 1", "Step 2", "Step 3"]);
+        assert_eq!(positions, vec![1, 2, 3]);
+
+        let detail = st.get_scenario_detail(scenario_id).unwrap();
+        assert_eq!(detail.progress.total_steps, 3);
+        assert_eq!(detail.progress.planned_steps, 1);
+        assert_eq!(detail.progress.in_progress_steps, 1);
+        assert_eq!(detail.progress.blocked_steps, 1);
+    }
+
+    #[test]
+    fn scenario_steps_move_update_and_delete_renumber() {
+        let st = test_store();
+        let scenario_id = st.create_scenario("CLI project", "", "", &[]).unwrap();
+
+        let step_a = st
+            .create_scenario_step(scenario_id, "First", "", None, "planned")
+            .unwrap();
+        let step_b = st
+            .create_scenario_step(scenario_id, "Second", "", None, "planned")
+            .unwrap();
+        let step_c = st
+            .create_scenario_step(scenario_id, "Third", "", None, "planned")
+            .unwrap();
+
+        st.move_scenario_step(step_c, 1).unwrap();
+        let steps = st.list_scenario_steps(scenario_id).unwrap();
+        let titles: Vec<&str> = steps.iter().map(|s| s.title.as_str()).collect();
+        assert_eq!(titles, vec!["Third", "First", "Second"]);
+
+        st.update_scenario_step(step_b, None, None, Some("completed"))
+            .unwrap();
+        let steps = st.list_scenario_steps(scenario_id).unwrap();
+        let second = steps.iter().find(|s| s.id == step_b).unwrap();
+        assert_eq!(second.status, "completed");
+        assert!(!second.completed_at.is_empty());
+
+        st.update_scenario_step(step_b, None, None, Some("planned"))
+            .unwrap();
+        let steps = st.list_scenario_steps(scenario_id).unwrap();
+        let second = steps.iter().find(|s| s.id == step_b).unwrap();
+        assert_eq!(second.status, "planned");
+        assert!(second.completed_at.is_empty());
+
+        st.delete_scenario_step(step_a).unwrap();
+        let steps = st.list_scenario_steps(scenario_id).unwrap();
+        let positions: Vec<i64> = steps.iter().map(|s| s.position).collect();
+        let ids: Vec<i64> = steps.iter().map(|s| s.id).collect();
+        assert_eq!(positions, vec![1, 2]);
+        assert_eq!(ids, vec![step_c, step_b]);
+    }
 }

@@ -12,8 +12,8 @@ use cli_core::{
 };
 use serde::Deserialize;
 
-use store::{validate_level, validate_status, Card, Deck, Store};
-use tui_helpers::{level_bar, level_label};
+use store::{validate_level, validate_status, validate_step_status, Card, Deck, Store};
+use tui_helpers::{level_bar, level_label, status_icon};
 
 // --- CLI ---
 
@@ -190,6 +190,58 @@ enum ScenarioCommands {
         scenario_id: i64,
         #[arg(long)]
         skill_id: i64,
+    },
+    /// Manage scenario plan steps
+    Step {
+        #[command(subcommand)]
+        command: ScenarioStepCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum ScenarioStepCommands {
+    /// Add scenario step
+    Add {
+        #[arg(long)]
+        scenario_id: i64,
+        #[arg(long)]
+        title: String,
+        #[arg(long, default_value = "")]
+        description: String,
+        #[arg(long)]
+        position: Option<i64>,
+        #[arg(long, default_value = "planned")]
+        status: String,
+    },
+    /// List scenario steps
+    List {
+        #[arg(long)]
+        scenario_id: i64,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Update scenario step
+    Update {
+        #[arg(long)]
+        step_id: i64,
+        #[arg(long)]
+        title: Option<String>,
+        #[arg(long)]
+        description: Option<String>,
+        #[arg(long)]
+        status: Option<String>,
+    },
+    /// Move scenario step
+    Move {
+        #[arg(long)]
+        step_id: i64,
+        #[arg(long)]
+        position: i64,
+    },
+    /// Delete scenario step
+    Delete {
+        #[arg(long)]
+        step_id: i64,
     },
 }
 
@@ -491,6 +543,42 @@ fn print_skill_links(decks: &[Deck], scenarios: &[store::Scenario], indent: &str
     }
 }
 
+fn format_scenario_progress(progress: &store::ScenarioProgress) -> String {
+    if progress.total_steps == 0 {
+        return "0 steps".to_string();
+    }
+
+    format!(
+        "{}/{} completed · {} in progress · {} planned · {} blocked · {} skipped",
+        progress.completed_steps,
+        progress.total_steps,
+        progress.in_progress_steps,
+        progress.planned_steps,
+        progress.blocked_steps,
+        progress.skipped_steps
+    )
+}
+
+fn print_scenario_steps(steps: &[store::ScenarioStep], indent: &str) {
+    if steps.is_empty() {
+        println!("{indent}(no steps)");
+        return;
+    }
+
+    for step in steps {
+        println!(
+            "{indent}{}. {} {} [{}]",
+            step.position,
+            status_icon(&step.status),
+            step.title,
+            step.status
+        );
+        if !step.description.is_empty() {
+            println!("{indent}   {}", step.description);
+        }
+    }
+}
+
 fn print_skill_tree(skills: &[store::Skill], depth: usize) {
     for s in skills {
         let indent = "  ".repeat(depth);
@@ -724,7 +812,7 @@ fn run_scenario(cmd: ScenarioCommands) -> Result<(), String> {
             json: json_flag,
         } => {
             let st = Store::open()?;
-            let sc = st.get_scenario(id)?;
+            let sc = st.get_scenario_detail(id)?;
             if json_flag {
                 json(&sc);
                 return Ok(());
@@ -742,6 +830,9 @@ fn run_scenario(cmd: ScenarioCommands) -> Result<(), String> {
                     println!("  {}: {}", s.id, s.name);
                 }
             }
+            println!("Plan: {}", format_scenario_progress(&sc.progress));
+            println!("Steps:");
+            print_scenario_steps(&sc.steps, "  ");
             Ok(())
         }
         ScenarioCommands::Update {
@@ -787,6 +878,70 @@ fn run_scenario(cmd: ScenarioCommands) -> Result<(), String> {
             let st = Store::open()?;
             st.unlink_scenario_skill(scenario_id, skill_id)?;
             println!("Unlinked scenario {scenario_id} from skill {skill_id}");
+            Ok(())
+        }
+        ScenarioCommands::Step { command } => run_scenario_step(command),
+    }
+}
+
+fn run_scenario_step(cmd: ScenarioStepCommands) -> Result<(), String> {
+    match cmd {
+        ScenarioStepCommands::Add {
+            scenario_id,
+            title,
+            description,
+            position,
+            status,
+        } => {
+            validate_step_status(&status)?;
+            let st = Store::open()?;
+            let id =
+                st.create_scenario_step(scenario_id, &title, &description, position, &status)?;
+            println!("Created scenario step {id}: {title}");
+            Ok(())
+        }
+        ScenarioStepCommands::List {
+            scenario_id,
+            json: json_flag,
+        } => {
+            let st = Store::open()?;
+            let steps = st.list_scenario_steps(scenario_id)?;
+            if json_flag {
+                json(&steps);
+                return Ok(());
+            }
+            print_scenario_steps(&steps, "");
+            Ok(())
+        }
+        ScenarioStepCommands::Update {
+            step_id,
+            title,
+            description,
+            status,
+        } => {
+            if let Some(ref value) = status {
+                validate_step_status(value)?;
+            }
+            let st = Store::open()?;
+            st.update_scenario_step(
+                step_id,
+                title.as_deref(),
+                description.as_deref(),
+                status.as_deref(),
+            )?;
+            println!("Updated scenario step {step_id}");
+            Ok(())
+        }
+        ScenarioStepCommands::Move { step_id, position } => {
+            let st = Store::open()?;
+            st.move_scenario_step(step_id, position)?;
+            println!("Moved scenario step {step_id} to position {position}");
+            Ok(())
+        }
+        ScenarioStepCommands::Delete { step_id } => {
+            let st = Store::open()?;
+            st.delete_scenario_step(step_id)?;
+            println!("Deleted scenario step {step_id}");
             Ok(())
         }
     }
