@@ -30,6 +30,19 @@ struct DetailSection {
     scenarios: Vec<ScenarioDetail>,
 }
 
+#[derive(Clone, Copy)]
+enum DetailAction {
+    None,
+    Deck(usize),
+    Scenario(i64),
+}
+
+struct DetailView {
+    lines: Vec<Line<'static>>,
+    focus_actions: Vec<DetailAction>,
+    focus_rows: Vec<usize>,
+}
+
 #[derive(PartialEq, Clone, Copy)]
 enum AppStage {
     Tree,
@@ -162,6 +175,7 @@ struct TreeState {
     detail_decks: Vec<Deck>,
     detail_sections: Vec<DetailSection>,
     detail_scenarios: Vec<ScenarioDetail>,
+    collapsed_scenarios: HashSet<i64>,
     // Search
     searching: bool,
     search_query: String,
@@ -205,13 +219,18 @@ impl TreeState {
         let mut d_decks = Vec::new();
         let mut sections = Vec::new();
         let mut d_scenarios = Vec::new();
+        let mut collapsed_scenarios = HashSet::new();
 
         if !skill.decks.is_empty() || !skill.scenarios.is_empty() {
-            let scenarios: Vec<ScenarioDetail> = skill
+            let mut scenarios: Vec<ScenarioDetail> = skill
                 .scenarios
                 .iter()
                 .filter_map(|scenario| store.get_scenario_detail(scenario.id).ok())
                 .collect();
+            sort_scenarios_by_activity(&mut scenarios);
+            for scenario in &scenarios {
+                collapsed_scenarios.insert(scenario.id);
+            }
             sections.push(DetailSection {
                 name: skill.name.clone(),
                 level: skill.level,
@@ -227,11 +246,15 @@ impl TreeState {
             if child.decks.is_empty() && child.scenarios.is_empty() {
                 continue;
             }
-            let scenarios: Vec<ScenarioDetail> = child
+            let mut scenarios: Vec<ScenarioDetail> = child
                 .scenarios
                 .iter()
                 .filter_map(|scenario| store.get_scenario_detail(scenario.id).ok())
                 .collect();
+            sort_scenarios_by_activity(&mut scenarios);
+            for scenario in &scenarios {
+                collapsed_scenarios.insert(scenario.id);
+            }
             sections.push(DetailSection {
                 name: child.name.clone(),
                 level: child.level,
@@ -246,6 +269,7 @@ impl TreeState {
         self.detail_decks = d_decks;
         self.detail_sections = sections;
         self.detail_scenarios = d_scenarios;
+        self.collapsed_scenarios = collapsed_scenarios;
         self.detail_cursor = 0;
     }
 
@@ -395,6 +419,7 @@ pub fn run_tree(
         detail_decks: vec![],
         detail_sections: vec![],
         detail_scenarios: vec![],
+        collapsed_scenarios: HashSet::new(),
         searching: false,
         search_query: String::new(),
         search_confirmed: false,
@@ -506,8 +531,11 @@ fn run_tree_loop(
                         }
                     }
                     KeyCode::Down | KeyCode::Char('j') => {
-                        if state.detail_cursor + 1 < state.detail_decks.len() {
-                            state.detail_cursor += 1;
+                        if let Some(ref skill) = state.selected {
+                            let detail = build_detail_view(skill, &state, usize::MAX);
+                            if state.detail_cursor + 1 < detail.focus_actions.len() {
+                                state.detail_cursor += 1;
+                            }
                         }
                     }
                     KeyCode::Char('?') => {
@@ -542,24 +570,54 @@ fn run_tree_loop(
                         }
                     }
                     KeyCode::Enter | KeyCode::Char(' ') => {
-                        if !state.detail_decks.is_empty() {
-                            let mut r_cards = HashMap::new();
-                            for d in &state.detail_decks {
-                                r_cards.insert(
-                                    d.id,
-                                    state.cards_by_deck.get(&d.id).cloned().unwrap_or_default(),
-                                );
+                        if let Some(ref skill) = state.selected {
+                            let detail = build_detail_view(skill, &state, usize::MAX);
+                            if state.detail_cursor >= detail.focus_actions.len()
+                                && !detail.focus_actions.is_empty()
+                            {
+                                state.detail_cursor = detail.focus_actions.len() - 1;
                             }
-                            state.review = Some(ReviewState::new(
-                                state.detail_decks.clone(),
-                                r_cards,
-                                state.detail_cursor,
-                                "auto".into(),
-                                true,
-                                store,
-                            ));
-                            state.prev_stage = AppStage::Detail;
-                            state.stage = AppStage::Review;
+                            let action = detail
+                                .focus_actions
+                                .get(state.detail_cursor)
+                                .copied()
+                                .unwrap_or(DetailAction::None);
+                            match action {
+                                DetailAction::Deck(deck_index)
+                                    if !state.detail_decks.is_empty() =>
+                                {
+                                    let mut r_cards = HashMap::new();
+                                    for d in &state.detail_decks {
+                                        r_cards.insert(
+                                            d.id,
+                                            state
+                                                .cards_by_deck
+                                                .get(&d.id)
+                                                .cloned()
+                                                .unwrap_or_default(),
+                                        );
+                                    }
+                                    state.review = Some(ReviewState::new(
+                                        state.detail_decks.clone(),
+                                        r_cards,
+                                        deck_index,
+                                        "auto".into(),
+                                        true,
+                                        store,
+                                    ));
+                                    state.prev_stage = AppStage::Detail;
+                                    state.stage = AppStage::Review;
+                                }
+                                DetailAction::Deck(_) => {}
+                                DetailAction::Scenario(id) => {
+                                    if state.collapsed_scenarios.contains(&id) {
+                                        state.collapsed_scenarios.remove(&id);
+                                    } else {
+                                        state.collapsed_scenarios.insert(id);
+                                    }
+                                }
+                                DetailAction::None => {}
+                            }
                         }
                     }
                     _ => {}
@@ -1065,95 +1123,239 @@ fn draw_level_help(f: &mut Frame, area: Rect) {
     f.render_widget(paragraph, area);
 }
 
-fn push_scenario_lines(lines: &mut Vec<Line>, scenario: &ScenarioDetail, indent: &str) {
+fn push_static_line(lines: &mut Vec<Line<'static>>, line: Line<'static>) {
+    lines.push(line);
+}
+
+fn push_focus_line(
+    lines: &mut Vec<Line<'static>>,
+    focus_actions: &mut Vec<DetailAction>,
+    focus_rows: &mut Vec<usize>,
+    line: Line<'static>,
+    action: DetailAction,
+) {
+    focus_rows.push(lines.len());
+    lines.push(line);
+    focus_actions.push(action);
+}
+
+fn effective_scenario_updated_at(scenario: &ScenarioDetail) -> &str {
+    scenario
+        .steps
+        .iter()
+        .map(|step| step.updated_at.as_str())
+        .chain(std::iter::once(scenario.updated_at.as_str()))
+        .max()
+        .unwrap_or(scenario.updated_at.as_str())
+}
+
+fn sort_scenarios_by_activity(scenarios: &mut [ScenarioDetail]) {
+    scenarios.sort_by(|a, b| {
+        effective_scenario_updated_at(b)
+            .cmp(effective_scenario_updated_at(a))
+            .then_with(|| a.name.cmp(&b.name))
+    });
+}
+
+fn normalize_description_paragraphs(description: &str) -> Vec<String> {
+    let mut paragraphs = Vec::new();
+    let mut current = Vec::new();
+
+    for raw_line in description.lines() {
+        let line = raw_line.trim();
+        if line.is_empty() {
+            if !current.is_empty() {
+                paragraphs.push(current.join(" "));
+                current.clear();
+            }
+            continue;
+        }
+        current.push(line.to_string());
+    }
+
+    if !current.is_empty() {
+        paragraphs.push(current.join(" "));
+    }
+
+    paragraphs
+}
+
+fn wrap_paragraph(text: &str, width: usize) -> Vec<String> {
+    if text.is_empty() {
+        return vec![String::new()];
+    }
+    if width == 0 {
+        return vec![text.to_string()];
+    }
+
+    let mut lines = Vec::new();
+    let mut current = String::new();
+
+    for word in text.split_whitespace() {
+        let next_len =
+            current.chars().count() + usize::from(!current.is_empty()) + word.chars().count();
+        if next_len <= width {
+            if !current.is_empty() {
+                current.push(' ');
+            }
+            current.push_str(word);
+            continue;
+        }
+
+        if !current.is_empty() {
+            lines.push(current);
+            current = String::new();
+        }
+
+        current.push_str(word);
+    }
+
+    if !current.is_empty() {
+        lines.push(current);
+    }
+
+    lines
+}
+
+fn push_scenario_lines(
+    lines: &mut Vec<Line<'static>>,
+    focus_actions: &mut Vec<DetailAction>,
+    focus_rows: &mut Vec<usize>,
+    state: &TreeState,
+    scenario: &ScenarioDetail,
+    indent: &str,
+    content_width: usize,
+) {
     let icon = status_icon(&scenario.status);
-    lines.push(Line::from(vec![
-        Span::raw(format!("{indent}{icon} {}", scenario.name)),
-        Span::raw("  "),
-        Span::styled(
-            format!(
-                "{}/{} complete",
-                scenario.progress.completed_steps, scenario.progress.total_steps
+    let collapsed = state.collapsed_scenarios.contains(&scenario.id);
+    let arrow = if collapsed { "▸" } else { "▾" };
+    let selected = state.detail_cursor == focus_actions.len();
+    let name_style = if selected {
+        Style::default()
+            .fg(Color::Magenta)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default()
+    };
+
+    push_focus_line(
+        lines,
+        focus_actions,
+        focus_rows,
+        Line::from(vec![
+            Span::styled(
+                format!("{indent}{arrow} {icon} {}", scenario.name),
+                name_style,
             ),
-            Style::default().fg(Color::DarkGray),
-        ),
-    ]));
+            Span::raw("  "),
+            Span::styled(
+                format!(
+                    "{}/{} complete",
+                    scenario.progress.completed_steps, scenario.progress.total_steps
+                ),
+                Style::default().fg(Color::DarkGray),
+            ),
+        ]),
+        DetailAction::Scenario(scenario.id),
+    );
+
+    if collapsed {
+        return;
+    }
 
     for step in &scenario.steps {
         let step_icon = status_icon(&step.status);
-        lines.push(Line::from(format!(
-            "{indent}  {step_icon} {}. {}",
-            step.position, step.title
-        )));
+        push_static_line(
+            lines,
+            Line::from(format!(
+                "{indent}  {step_icon} {}. {}",
+                step.position, step.title
+            )),
+        );
         if !step.description.is_empty() {
-            lines.push(Line::from(Span::styled(
-                format!("{indent}      {}", step.description),
-                Style::default().fg(Color::DarkGray),
-            )));
+            let desc_prefix = format!("{indent}      ");
+            let desc_width = content_width.saturating_sub(desc_prefix.chars().count());
+            let desc_style = Style::default().fg(Color::Rgb(150, 160, 176));
+
+            for (paragraph_idx, paragraph) in normalize_description_paragraphs(&step.description)
+                .into_iter()
+                .enumerate()
+            {
+                if paragraph_idx > 0 {
+                    push_static_line(lines, Line::from(""));
+                }
+                for wrapped_line in wrap_paragraph(&paragraph, desc_width) {
+                    push_static_line(
+                        lines,
+                        Line::from(Span::styled(
+                            format!("{desc_prefix}{wrapped_line}"),
+                            desc_style,
+                        )),
+                    );
+                }
+            }
         }
     }
 }
 
-fn draw_detail(f: &mut Frame, state: &TreeState, area: Rect) {
-    let skill = match &state.selected {
-        Some(s) => s,
-        None => {
-            let p = Paragraph::new("No skill selected.")
-                .block(Block::default().padding(ratatui::widgets::Padding::horizontal(2)));
-            f.render_widget(p, area);
-            return;
-        }
-    };
-
+fn build_detail_view(skill: &Skill, state: &TreeState, content_width: usize) -> DetailView {
     let level = clamp_level(skill.level);
     let has_children = !skill.children.is_empty();
     let mut lines = Vec::new();
+    let mut focus_actions = Vec::new();
+    let mut focus_rows = Vec::new();
 
     // Header
     let filled = "█".repeat(level);
     let empty = "░".repeat(5 - level);
     let color = LEVEL_COLORS[level];
-    lines.push(Line::from(vec![
-        Span::styled(
-            &skill.name,
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::raw("    "),
-        Span::styled(filled, Style::default().fg(color)),
-        Span::styled(empty, Style::default().fg(Color::DarkGray)),
-        Span::raw(" "),
-        Span::styled(
-            format!("{}/5 {}", skill.level, LEVEL_LABELS[level]),
-            Style::default().fg(color),
-        ),
-    ]));
+    push_static_line(
+        &mut lines,
+        Line::from(vec![
+            Span::styled(
+                skill.name.clone(),
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("    "),
+            Span::styled(filled, Style::default().fg(color)),
+            Span::styled(empty, Style::default().fg(Color::DarkGray)),
+            Span::raw(" "),
+            Span::styled(
+                format!("{}/5 {}", skill.level, LEVEL_LABELS[level]),
+                Style::default().fg(color),
+            ),
+        ]),
+    );
 
     if !skill.description.is_empty() {
-        lines.push(Line::from(Span::styled(
-            &skill.description,
-            Style::default().fg(Color::DarkGray),
-        )));
+        push_static_line(
+            &mut lines,
+            Line::from(Span::styled(
+                skill.description.clone(),
+                Style::default().fg(Color::DarkGray),
+            )),
+        );
     }
 
     if state.detail_decks.is_empty() && state.detail_scenarios.is_empty() {
-        lines.push(Line::from(""));
-        lines.push(Line::from("  No decks or scenarios linked."));
+        push_static_line(&mut lines, Line::from(""));
+        push_static_line(&mut lines, Line::from("  No decks or scenarios linked."));
     } else if !has_children {
-        lines.push(Line::from(""));
+        push_static_line(&mut lines, Line::from(""));
         if !state.detail_decks.is_empty() {
-            lines.push(Line::from(Span::styled(
-                "Decks",
-                Style::default().add_modifier(Modifier::BOLD),
-            )));
+            push_static_line(
+                &mut lines,
+                Line::from(Span::styled(
+                    "Decks",
+                    Style::default().add_modifier(Modifier::BOLD),
+                )),
+            );
             for (i, d) in state.detail_decks.iter().enumerate() {
-                let prefix = if i == state.detail_cursor {
-                    "  > "
-                } else {
-                    "    "
-                };
-                let name_style = if i == state.detail_cursor {
+                let selected = state.detail_cursor == focus_actions.len();
+                let prefix = if selected { "  > " } else { "    " };
+                let name_style = if selected {
                     Style::default()
                         .fg(Color::Magenta)
                         .add_modifier(Modifier::BOLD)
@@ -1162,26 +1364,43 @@ fn draw_detail(f: &mut Frame, state: &TreeState, area: Rect) {
                 };
                 let cov = coverage_text(d.covered_count, d.card_count);
                 let cov_color = coverage_color(d.covered_count, d.card_count);
-                lines.push(Line::from(vec![
-                    Span::styled(format!("{prefix}{}", d.name), name_style),
-                    Span::raw("  "),
-                    Span::styled(
-                        format!("{} cards", d.card_count),
-                        Style::default().fg(Color::DarkGray),
-                    ),
-                    Span::raw(" "),
-                    Span::styled(cov, Style::default().fg(cov_color)),
-                ]));
+                push_focus_line(
+                    &mut lines,
+                    &mut focus_actions,
+                    &mut focus_rows,
+                    Line::from(vec![
+                        Span::styled(format!("{prefix}{}", d.name), name_style),
+                        Span::raw("  "),
+                        Span::styled(
+                            format!("{} cards", d.card_count),
+                            Style::default().fg(Color::DarkGray),
+                        ),
+                        Span::raw(" "),
+                        Span::styled(cov, Style::default().fg(cov_color)),
+                    ]),
+                    DetailAction::Deck(i),
+                );
             }
         }
         if !state.detail_scenarios.is_empty() {
-            lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled(
-                "Scenarios",
-                Style::default().add_modifier(Modifier::BOLD),
-            )));
+            push_static_line(&mut lines, Line::from(""));
+            push_static_line(
+                &mut lines,
+                Line::from(Span::styled(
+                    "Scenarios",
+                    Style::default().add_modifier(Modifier::BOLD),
+                )),
+            );
             for scenario in &state.detail_scenarios {
-                push_scenario_lines(&mut lines, scenario, "  ");
+                push_scenario_lines(
+                    &mut lines,
+                    &mut focus_actions,
+                    &mut focus_rows,
+                    state,
+                    scenario,
+                    "  ",
+                    content_width,
+                );
             }
         }
     } else {
@@ -1191,38 +1410,41 @@ fn draw_detail(f: &mut Frame, state: &TreeState, area: Rect) {
             let filled = "█".repeat(sec_level);
             let empty = "░".repeat(5 - sec_level);
 
-            lines.push(Line::from(""));
-            lines.push(Line::from(vec![
-                Span::styled(
-                    &sec.name,
-                    Style::default()
-                        .fg(Color::Cyan)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::raw("  "),
-                Span::styled(filled, Style::default().fg(sec_color)),
-                Span::styled(empty, Style::default().fg(Color::DarkGray)),
-                Span::raw(" "),
-                Span::styled(
-                    format!("{}/5 {}", sec.level, LEVEL_LABELS[sec_level]),
-                    Style::default().fg(sec_color),
-                ),
-            ]));
+            push_static_line(&mut lines, Line::from(""));
+            push_static_line(
+                &mut lines,
+                Line::from(vec![
+                    Span::styled(
+                        sec.name.clone(),
+                        Style::default()
+                            .fg(Color::Cyan)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::raw("  "),
+                    Span::styled(filled, Style::default().fg(sec_color)),
+                    Span::styled(empty, Style::default().fg(Color::DarkGray)),
+                    Span::raw(" "),
+                    Span::styled(
+                        format!("{}/5 {}", sec.level, LEVEL_LABELS[sec_level]),
+                        Style::default().fg(sec_color),
+                    ),
+                ]),
+            );
 
             if sec.deck_count > 0 {
-                lines.push(Line::from(Span::styled(
-                    "  Decks:",
-                    Style::default().fg(Color::DarkGray),
-                )));
+                push_static_line(
+                    &mut lines,
+                    Line::from(Span::styled(
+                        "  Decks:",
+                        Style::default().fg(Color::DarkGray),
+                    )),
+                );
                 for di in 0..sec.deck_count {
                     let idx = sec.deck_start + di;
                     let d = &state.detail_decks[idx];
-                    let prefix = if idx == state.detail_cursor {
-                        "    > "
-                    } else {
-                        "      "
-                    };
-                    let name_style = if idx == state.detail_cursor {
+                    let selected = state.detail_cursor == focus_actions.len();
+                    let prefix = if selected { "    > " } else { "      " };
+                    let name_style = if selected {
                         Style::default()
                             .fg(Color::Magenta)
                             .add_modifier(Modifier::BOLD)
@@ -1231,38 +1453,87 @@ fn draw_detail(f: &mut Frame, state: &TreeState, area: Rect) {
                     };
                     let cov = coverage_text(d.covered_count, d.card_count);
                     let cov_color = coverage_color(d.covered_count, d.card_count);
-                    lines.push(Line::from(vec![
-                        Span::styled(format!("{prefix}{}", d.name), name_style),
-                        Span::raw("  "),
-                        Span::styled(
-                            format!("{} cards", d.card_count),
-                            Style::default().fg(Color::DarkGray),
-                        ),
-                        Span::raw(" "),
-                        Span::styled(cov, Style::default().fg(cov_color)),
-                    ]));
+                    push_focus_line(
+                        &mut lines,
+                        &mut focus_actions,
+                        &mut focus_rows,
+                        Line::from(vec![
+                            Span::styled(format!("{prefix}{}", d.name), name_style),
+                            Span::raw("  "),
+                            Span::styled(
+                                format!("{} cards", d.card_count),
+                                Style::default().fg(Color::DarkGray),
+                            ),
+                            Span::raw(" "),
+                            Span::styled(cov, Style::default().fg(cov_color)),
+                        ]),
+                        DetailAction::Deck(idx),
+                    );
                 }
             }
 
             if !sec.scenarios.is_empty() {
-                lines.push(Line::from(Span::styled(
-                    "  Scenarios:",
-                    Style::default().fg(Color::DarkGray),
-                )));
+                push_static_line(
+                    &mut lines,
+                    Line::from(Span::styled(
+                        "  Scenarios:",
+                        Style::default().fg(Color::DarkGray),
+                    )),
+                );
                 for scenario in &sec.scenarios {
-                    push_scenario_lines(&mut lines, scenario, "    ");
+                    push_scenario_lines(
+                        &mut lines,
+                        &mut focus_actions,
+                        &mut focus_rows,
+                        state,
+                        scenario,
+                        "    ",
+                        content_width,
+                    );
                 }
             }
         }
     }
 
-    lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        "j/k Navigate enter Review t Test ? Levels b Back q Quit",
-        Style::default().fg(Color::DarkGray),
-    )));
+    push_static_line(&mut lines, Line::from(""));
+    push_static_line(
+        &mut lines,
+        Line::from(Span::styled(
+            "j/k Navigate enter Review/Toggle t Test ? Levels b Back q Quit",
+            Style::default().fg(Color::DarkGray),
+        )),
+    );
 
-    let paragraph = Paragraph::new(lines)
+    DetailView {
+        lines,
+        focus_actions,
+        focus_rows,
+    }
+}
+
+fn draw_detail(f: &mut Frame, state: &TreeState, area: Rect) {
+    let selected = match &state.selected {
+        Some(skill) => skill,
+        None => {
+            let p = Paragraph::new("No skill selected.")
+                .block(Block::default().padding(ratatui::widgets::Padding::horizontal(2)));
+            f.render_widget(p, area);
+            return;
+        }
+    };
+
+    let content_width = area.width.saturating_sub(4) as usize;
+    let detail = build_detail_view(selected, state, content_width);
+    let viewport_height = area.height.max(1) as usize;
+    let scroll_row = detail
+        .focus_rows
+        .get(state.detail_cursor)
+        .copied()
+        .unwrap_or(0);
+    let scroll = scroll_row.saturating_sub(viewport_height.saturating_sub(1)) as u16;
+
+    let paragraph = Paragraph::new(detail.lines)
+        .scroll((scroll, 0))
         .block(Block::default().padding(ratatui::widgets::Padding::horizontal(2)));
     f.render_widget(paragraph, area);
 }
