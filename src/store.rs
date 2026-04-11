@@ -14,7 +14,7 @@ pub struct Skill {
     pub parent_id: Option<i64>,
     pub name: String,
     pub description: String,
-    pub level: i64,
+    pub level: Option<i64>,
     pub children: Vec<Skill>,
     pub decks: Vec<Deck>,
     pub scenarios: Vec<Scenario>,
@@ -74,6 +74,24 @@ pub struct ScenarioDetail {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct SkillRef {
+    pub id: i64,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ActiveScenarioSummary {
+    pub id: i64,
+    pub name: String,
+    pub description: String,
+    pub repo_path: String,
+    pub status: String,
+    pub skills: Vec<SkillRef>,
+    pub progress: ScenarioProgress,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct Deck {
     pub id: i64,
     pub name: String,
@@ -98,7 +116,35 @@ pub struct Card {
 #[derive(Debug, Clone, Serialize)]
 pub struct Context {
     pub skills: Vec<Skill>,
-    pub active_scenarios: Vec<ScenarioDetail>,
+    pub active_scenarios: Vec<ActiveScenarioSummary>,
+}
+
+fn attach_links(
+    skills: &mut [Skill],
+    deck_links: &HashMap<i64, Vec<Deck>>,
+    scenario_links: &HashMap<i64, Vec<Scenario>>,
+) {
+    for skill in skills.iter_mut() {
+        if let Some(decks) = deck_links.get(&skill.id) {
+            skill.decks = decks.clone();
+        }
+        if let Some(scenarios) = scenario_links.get(&skill.id) {
+            skill.scenarios = scenarios.clone();
+        }
+        attach_links(&mut skill.children, deck_links, scenario_links);
+    }
+}
+
+fn find_skill_subtree(skills: &[Skill], skill_id: i64) -> Option<Skill> {
+    for skill in skills {
+        if skill.id == skill_id {
+            return Some(skill.clone());
+        }
+        if let Some(found) = find_skill_subtree(&skill.children, skill_id) {
+            return Some(found);
+        }
+    }
+    None
 }
 
 // --- Validation ---
@@ -194,7 +240,7 @@ fn migrate(db: &Connection) -> Result<(), String> {
             parent_id   INTEGER REFERENCES skills(id) ON DELETE CASCADE,
             name        TEXT NOT NULL,
             description TEXT,
-            level       INTEGER NOT NULL DEFAULT 0,
+            level       INTEGER DEFAULT 0,
             created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
             updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP
         )",
@@ -388,6 +434,53 @@ impl Store {
             .map_err(|_| format!("scenario {scenario_id} not found"))
     }
 
+    fn skill_depth(&self, skill_id: i64) -> Result<usize, String> {
+        let mut depth = 0usize;
+        let mut current_id = skill_id;
+
+        loop {
+            let parent_id: Option<i64> = self
+                .db
+                .query_row(
+                    "SELECT parent_id FROM skills WHERE id = ?1",
+                    params![current_id],
+                    |row| row.get(0),
+                )
+                .map_err(|_| format!("skill {skill_id} not found"))?;
+
+            match parent_id {
+                Some(parent_id) => {
+                    depth += 1;
+                    current_id = parent_id;
+                }
+                None => return Ok(depth),
+            }
+        }
+    }
+
+    fn child_skill_depth(&self, parent_id: Option<i64>) -> Result<usize, String> {
+        match parent_id {
+            None => Ok(0),
+            Some(parent_id) => Ok(self.skill_depth(parent_id)? + 1),
+        }
+    }
+
+    fn normalize_skill_level_for_depth(
+        &self,
+        depth: usize,
+        level: Option<i64>,
+    ) -> Result<Option<i64>, String> {
+        match (depth, level) {
+            (0..=1, Some(level)) => {
+                validate_level(level)?;
+                Ok(Some(level))
+            }
+            (0..=1, None) => Ok(Some(0)),
+            (_, Some(_)) => Err("skills at depth 2+ do not support levels".into()),
+            (_, None) => Ok(None),
+        }
+    }
+
     fn scenario_step_ids(&self, scenario_id: i64) -> Result<Vec<i64>, String> {
         let mut stmt = self
             .db
@@ -443,6 +536,33 @@ impl Store {
         })
     }
 
+    fn build_active_scenario_summary(
+        &self,
+        scenario: Scenario,
+    ) -> Result<ActiveScenarioSummary, String> {
+        let skills = self
+            .skills_for_scenario(scenario.id)?
+            .into_iter()
+            .map(|skill| SkillRef {
+                id: skill.id,
+                name: skill.name,
+            })
+            .collect();
+        let steps = self.list_scenario_steps(scenario.id)?;
+        let progress = scenario_progress(&steps);
+
+        Ok(ActiveScenarioSummary {
+            id: scenario.id,
+            name: scenario.name,
+            description: scenario.description,
+            repo_path: scenario.repo_path,
+            status: scenario.status,
+            skills,
+            progress,
+            updated_at: scenario.updated_at,
+        })
+    }
+
     // --- Skill CRUD ---
 
     pub fn create_skill(
@@ -450,13 +570,15 @@ impl Store {
         name: &str,
         description: &str,
         parent_id: Option<i64>,
-        level: i64,
+        level: Option<i64>,
     ) -> Result<i64, String> {
         let desc = if description.is_empty() {
             None
         } else {
             Some(description)
         };
+        let depth = self.child_skill_depth(parent_id)?;
+        let level = self.normalize_skill_level_for_depth(depth, level)?;
         self.db
             .execute(
                 "INSERT INTO skills(name, description, parent_id, level) VALUES(?1, ?2, ?3, ?4)",
@@ -648,6 +770,7 @@ impl Store {
         description: Option<&str>,
         level: Option<i64>,
     ) -> Result<(), String> {
+        let depth = self.skill_depth(id)?;
         let mut sets = Vec::new();
         let mut args: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
         if let Some(n) = name {
@@ -664,6 +787,10 @@ impl Store {
             args.push(Box::new(val));
         }
         if let Some(l) = level {
+            if depth >= 2 {
+                return Err("skills at depth 2+ do not support levels".into());
+            }
+            validate_level(l)?;
             sets.push("level = ?");
             args.push(Box::new(l));
         }
@@ -723,10 +850,9 @@ impl Store {
         Ok(build_tree(all))
     }
 
-    pub fn full_context(&self) -> Result<Context, String> {
-        let tree = self.skill_tree()?;
-
-        // Load deck links: skill_id -> Vec<Deck>
+    fn context_links(
+        &self,
+    ) -> Result<(HashMap<i64, Vec<Deck>>, HashMap<i64, Vec<Scenario>>), String> {
         let mut deck_links: HashMap<i64, Vec<Deck>> = HashMap::new();
         {
             let mut stmt = self
@@ -798,50 +924,87 @@ impl Store {
                 scenario_links.entry(skill_id).or_default().push(scenario);
             }
         }
+        Ok((deck_links, scenario_links))
+    }
 
-        // Attach links to tree
-        fn attach_links(
-            skills: &mut [Skill],
-            deck_links: &HashMap<i64, Vec<Deck>>,
-            scenario_links: &HashMap<i64, Vec<Scenario>>,
-        ) {
-            for skill in skills.iter_mut() {
-                if let Some(decks) = deck_links.get(&skill.id) {
-                    skill.decks = decks.clone();
-                }
-                if let Some(scenarios) = scenario_links.get(&skill.id) {
-                    skill.scenarios = scenarios.clone();
-                }
-                attach_links(&mut skill.children, deck_links, scenario_links);
-            }
-        }
-        let mut tree = tree;
-        attach_links(&mut tree, &deck_links, &scenario_links);
+    fn active_scenarios_for_skill_ids(
+        &self,
+        skill_ids: &[i64],
+    ) -> Result<Vec<ActiveScenarioSummary>, String> {
+        let active: Vec<Scenario> = if skill_ids.is_empty() {
+            let mut stmt = self
+                .db
+                .prepare(
+                    "SELECT id, name, COALESCE(description,'') as description, COALESCE(repo_path,'') as repo_path,
+                            status, created_at, updated_at, COALESCE(completed_at,'') as completed_at
+                     FROM scenarios
+                     WHERE status IN ('planned', 'in_progress')
+                     ORDER BY status DESC, name ASC",
+                )
+                .map_err(|e| e.to_string())?;
+            let rows = stmt
+                .query_map([], scenario_from_row)
+                .map_err(|e| e.to_string())?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| e.to_string())?;
+            rows
+        } else {
+            let placeholders: Vec<String> =
+                (1..=skill_ids.len()).map(|i| format!("?{i}")).collect();
+            let query = format!(
+                "SELECT DISTINCT sc.id, sc.name, COALESCE(sc.description,'') as description, COALESCE(sc.repo_path,'') as repo_path,
+                        sc.status, sc.created_at, sc.updated_at, COALESCE(sc.completed_at,'') as completed_at
+                 FROM scenarios sc
+                 JOIN scenario_skills ss ON ss.scenario_id = sc.id
+                 WHERE sc.status IN ('planned', 'in_progress')
+                   AND ss.skill_id IN ({})
+                 ORDER BY sc.status DESC, sc.name ASC",
+                placeholders.join(",")
+            );
+            let params: Vec<&dyn rusqlite::types::ToSql> = skill_ids
+                .iter()
+                .map(|id| id as &dyn rusqlite::types::ToSql)
+                .collect();
+            let mut stmt = self.db.prepare(&query).map_err(|e| e.to_string())?;
+            let rows = stmt
+                .query_map(params.as_slice(), scenario_from_row)
+                .map_err(|e| e.to_string())?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| e.to_string())?;
+            rows
+        };
 
-        // Active scenarios
-        let mut stmt = self
-            .db
-            .prepare(
-                "SELECT id, name, COALESCE(description,'') as description, COALESCE(repo_path,'') as repo_path,
-                        status, created_at, updated_at, COALESCE(completed_at,'') as completed_at
-                 FROM scenarios
-                 WHERE status IN ('planned', 'in_progress')
-                 ORDER BY status DESC, name ASC",
-            )
-            .map_err(|e| e.to_string())?;
-        let active: Vec<Scenario> = stmt
-            .query_map([], scenario_from_row)
-            .map_err(|e| e.to_string())?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| e.to_string())?;
-
-        let active_scenarios = active
+        active
             .into_iter()
-            .map(|scenario| self.build_scenario_detail(scenario))
-            .collect::<Result<Vec<_>, _>>()?;
+            .map(|scenario| self.build_active_scenario_summary(scenario))
+            .collect::<Result<Vec<_>, _>>()
+    }
+
+    pub fn full_context(&self) -> Result<Context, String> {
+        let mut tree = self.skill_tree()?;
+        let (deck_links, scenario_links) = self.context_links()?;
+        attach_links(&mut tree, &deck_links, &scenario_links);
+        let active_scenarios = self.active_scenarios_for_skill_ids(&[])?;
 
         Ok(Context {
             skills: tree,
+            active_scenarios,
+        })
+    }
+
+    pub fn scoped_context(&self, skill_id: i64) -> Result<Context, String> {
+        let mut tree = self.skill_tree()?;
+        let (deck_links, scenario_links) = self.context_links()?;
+        attach_links(&mut tree, &deck_links, &scenario_links);
+        let skill = find_skill_subtree(&tree, skill_id)
+            .ok_or_else(|| format!("skill {skill_id} not found"))?;
+
+        let mut skill_ids = self.descendant_skill_ids(skill_id)?;
+        skill_ids.push(skill_id);
+        let active_scenarios = self.active_scenarios_for_skill_ids(&skill_ids)?;
+
+        Ok(Context {
+            skills: vec![skill],
             active_scenarios,
         })
     }
@@ -1948,5 +2111,75 @@ mod tests {
         let ids: Vec<i64> = steps.iter().map(|s| s.id).collect();
         assert_eq!(positions, vec![1, 2]);
         assert_eq!(ids, vec![step_c, step_b]);
+    }
+
+    #[test]
+    fn depth_two_skills_do_not_store_levels() {
+        let st = test_store();
+
+        let root_id = st.create_skill("Rust", "", None, Some(1)).unwrap();
+        let child_id = st
+            .create_skill("Ownership", "", Some(root_id), Some(2))
+            .unwrap();
+        let grandchild_id = st
+            .create_skill("Borrow checking", "", Some(child_id), None)
+            .unwrap();
+
+        let root = st.get_skill(root_id).unwrap();
+        let child = st.get_skill(child_id).unwrap();
+        let grandchild = st.get_skill(grandchild_id).unwrap();
+
+        assert_eq!(root.level, Some(1));
+        assert_eq!(child.level, Some(2));
+        assert_eq!(grandchild.level, None);
+
+        let err = st
+            .create_skill("Lifetimes", "", Some(child_id), Some(1))
+            .unwrap_err();
+        assert!(err.contains("depth 2+"));
+
+        let err = st
+            .update_skill(grandchild_id, None, None, Some(3))
+            .unwrap_err();
+        assert!(err.contains("depth 2+"));
+    }
+
+    #[test]
+    fn scoped_context_returns_selected_subtree_and_relevant_active_scenarios() {
+        let st = test_store();
+
+        let rust_id = st.create_skill("Rust", "", None, Some(1)).unwrap();
+        let concurrency_id = st
+            .create_skill("Concurrency", "", Some(rust_id), Some(1))
+            .unwrap();
+        let async_id = st
+            .create_skill("Async", "", Some(concurrency_id), None)
+            .unwrap();
+        let driving_id = st.create_skill("Driving", "", None, Some(1)).unwrap();
+
+        let rust_scenario = st
+            .create_scenario("Build async worker", "", "", &[concurrency_id])
+            .unwrap();
+        let _driving_scenario = st
+            .create_scenario("Practice parking", "", "", &[driving_id])
+            .unwrap();
+
+        st.update_scenario(rust_scenario, None, None, None, Some("in_progress"))
+            .unwrap();
+
+        let ctx = st.scoped_context(rust_id).unwrap();
+        assert_eq!(ctx.skills.len(), 1);
+        assert_eq!(ctx.skills[0].id, rust_id);
+        assert_eq!(ctx.skills[0].children.len(), 1);
+        assert_eq!(ctx.skills[0].children[0].id, concurrency_id);
+        assert_eq!(ctx.skills[0].children[0].children.len(), 1);
+        assert_eq!(ctx.skills[0].children[0].children[0].id, async_id);
+
+        let scenario_names: Vec<&str> = ctx
+            .active_scenarios
+            .iter()
+            .map(|s| s.name.as_str())
+            .collect();
+        assert_eq!(scenario_names, vec!["Build async worker"]);
     }
 }

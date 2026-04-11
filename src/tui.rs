@@ -24,7 +24,7 @@ struct FlatNode {
 
 struct DetailSection {
     name: String,
-    level: i64,
+    level: Option<i64>,
     deck_start: usize,
     deck_count: usize,
     scenarios: Vec<ScenarioDetail>,
@@ -998,8 +998,8 @@ fn draw_tree(f: &mut Frame, state: &TreeState) {
             0
         };
         let visible_end = (scroll_offset + max_visible).min(flat_nodes.len());
-        let base_name_col_width = 40;
-        let child_level_offset = 6;
+        let base_name_col_width: usize = 40;
+        let child_level_offset: usize = 6;
 
         for (i, node) in flat_nodes
             .iter()
@@ -1018,12 +1018,16 @@ fn draw_tree(f: &mut Frame, state: &TreeState) {
                 "─ "
             };
             let cursor_str = if i == state.cursor { "> " } else { "  " };
-            let level = clamp_level(node.skill.level);
             let is_match = state.match_set.contains(&node.skill.id);
             let info = leaf_info(&node.skill);
 
             let name_prefix = format!("{cursor_str}{indent}{prefix}");
-            let name_col_width = base_name_col_width + (node.depth * child_level_offset);
+            let depth_offset = if node.depth == 0 {
+                0
+            } else {
+                child_level_offset
+            };
+            let name_col_width = base_name_col_width + depth_offset;
             let name_width = name_col_width.saturating_sub(name_prefix.chars().count());
             let fitted_name = truncate_with_ellipsis(&node.skill.name, name_width);
             let fitted = format!("{name_prefix}{fitted_name}");
@@ -1045,20 +1049,24 @@ fn draw_tree(f: &mut Frame, state: &TreeState) {
                 Style::default()
             };
 
-            let level_lbl = level_label(node.skill.level);
-            let level_color = LEVEL_COLORS[level];
+            let mut spans = vec![Span::styled(padded, name_style)];
 
-            let mut spans = vec![Span::styled(padded, name_style), Span::raw("  ")];
-            // Level bar with color
-            let filled = "█".repeat(level);
-            let empty = "░".repeat(5 - level);
-            spans.push(Span::styled(filled, Style::default().fg(level_color)));
-            spans.push(Span::styled(empty, Style::default().fg(Color::DarkGray)));
-            spans.push(Span::raw(" "));
-            spans.push(Span::styled(
-                format!("{}/5 {level_lbl}", node.skill.level),
-                Style::default().fg(level_color),
-            ));
+            if let Some(skill_level) = node.skill.level {
+                let level = clamp_level(skill_level);
+                let level_lbl = level_label(skill_level);
+                let level_color = LEVEL_COLORS[level];
+                let filled = "█".repeat(level);
+                let empty = "░".repeat(5 - level);
+
+                spans.push(Span::raw("  "));
+                spans.push(Span::styled(filled, Style::default().fg(level_color)));
+                spans.push(Span::styled(empty, Style::default().fg(Color::DarkGray)));
+                spans.push(Span::raw(" "));
+                spans.push(Span::styled(
+                    format!("{skill_level}/5 {level_lbl}"),
+                    Style::default().fg(level_color),
+                ));
+            }
 
             if !info.is_empty() {
                 spans.push(Span::raw("   "));
@@ -1325,35 +1333,32 @@ fn push_scenario_lines(
 }
 
 fn build_detail_view(skill: &Skill, state: &TreeState, content_width: usize) -> DetailView {
-    let level = clamp_level(skill.level);
     let has_children = !skill.children.is_empty();
     let mut lines = Vec::new();
     let mut focus_actions = Vec::new();
     let mut focus_rows = Vec::new();
 
-    // Header
-    let filled = "█".repeat(level);
-    let empty = "░".repeat(5 - level);
-    let color = LEVEL_COLORS[level];
-    push_static_line(
-        &mut lines,
-        Line::from(vec![
-            Span::styled(
-                skill.name.clone(),
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::raw("    "),
-            Span::styled(filled, Style::default().fg(color)),
-            Span::styled(empty, Style::default().fg(Color::DarkGray)),
-            Span::raw(" "),
-            Span::styled(
-                format!("{}/5 {}", skill.level, LEVEL_LABELS[level]),
-                Style::default().fg(color),
-            ),
-        ]),
-    );
+    let mut header_spans = vec![Span::styled(
+        skill.name.clone(),
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD),
+    )];
+    if let Some(skill_level) = skill.level {
+        let level = clamp_level(skill_level);
+        let filled = "█".repeat(level);
+        let empty = "░".repeat(5 - level);
+        let color = LEVEL_COLORS[level];
+        header_spans.push(Span::raw("    "));
+        header_spans.push(Span::styled(filled, Style::default().fg(color)));
+        header_spans.push(Span::styled(empty, Style::default().fg(Color::DarkGray)));
+        header_spans.push(Span::raw(" "));
+        header_spans.push(Span::styled(
+            format!("{skill_level}/5 {}", LEVEL_LABELS[level]),
+            Style::default().fg(color),
+        ));
+    }
+    push_static_line(&mut lines, Line::from(header_spans));
 
     if !skill.description.is_empty() {
         push_static_line(
@@ -1431,31 +1436,28 @@ fn build_detail_view(skill: &Skill, state: &TreeState, content_width: usize) -> 
         }
     } else {
         for sec in &state.detail_sections {
-            let sec_level = clamp_level(sec.level);
-            let sec_color = LEVEL_COLORS[sec_level];
-            let filled = "█".repeat(sec_level);
-            let empty = "░".repeat(5 - sec_level);
-
             push_static_line(&mut lines, Line::from(""));
-            push_static_line(
-                &mut lines,
-                Line::from(vec![
-                    Span::styled(
-                        sec.name.clone(),
-                        Style::default()
-                            .fg(Color::Cyan)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::raw("  "),
-                    Span::styled(filled, Style::default().fg(sec_color)),
-                    Span::styled(empty, Style::default().fg(Color::DarkGray)),
-                    Span::raw(" "),
-                    Span::styled(
-                        format!("{}/5 {}", sec.level, LEVEL_LABELS[sec_level]),
-                        Style::default().fg(sec_color),
-                    ),
-                ]),
-            );
+            let mut sec_spans = vec![Span::styled(
+                sec.name.clone(),
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            )];
+            if let Some(sec_level_value) = sec.level {
+                let sec_level = clamp_level(sec_level_value);
+                let sec_color = LEVEL_COLORS[sec_level];
+                let filled = "█".repeat(sec_level);
+                let empty = "░".repeat(5 - sec_level);
+                sec_spans.push(Span::raw("  "));
+                sec_spans.push(Span::styled(filled, Style::default().fg(sec_color)));
+                sec_spans.push(Span::styled(empty, Style::default().fg(Color::DarkGray)));
+                sec_spans.push(Span::raw(" "));
+                sec_spans.push(Span::styled(
+                    format!("{sec_level_value}/5 {}", LEVEL_LABELS[sec_level]),
+                    Style::default().fg(sec_color),
+                ));
+            }
+            push_static_line(&mut lines, Line::from(sec_spans));
 
             if sec.deck_count > 0 {
                 push_static_line(

@@ -24,6 +24,13 @@ skill-tree context --json
 ```
 This returns the full skill tree with levels, linked decks (with card counts), linked scenarios, and all active (planned/in_progress) scenarios. Use this to understand where the learner currently stands.
 
+When a session is already focused on one skill area, prefer scoped context:
+```
+skill-tree context --skill "Rust" --json
+skill-tree context --skill-id 59 --json
+```
+This returns the selected skill subtree and scopes the surrounding context to that area.
+
 ## Database location
 - `$HOME/.skill-tree/skill-tree.db`
 
@@ -34,9 +41,11 @@ This returns the full skill tree with levels, linked decks (with card counts), l
   - An integer `ID` (primary identifier).
   - An optional `parent_id` forming a hierarchy (tree structure).
   - A `name` and optional `description`.
-  - A `level` (0-5) indicating proficiency.
+  - A `level` (0-5) indicating proficiency on root and first-level child skills.
   - Linked decks and scenarios (via junction tables).
   - Timestamps (`created_at`, `updated_at`).
+
+Levels apply only to root skills and their direct children. Depth-2 and deeper skills are structural and do not carry a level.
 
 ### Level scale (0-5)
 
@@ -237,7 +246,7 @@ Imports all decks and cards from `~/.quiz/quiz.db` into skill-tree. Skips decks 
 1. Create the skill hierarchy:
    - `skill-tree skill add --name "AWS"`
    - `skill-tree skill add --name "Networking" --parent-id 1`
-   - `skill-tree skill add --name "VPC" --parent-id 2 --level 0`
+   - `skill-tree skill add --name "VPC" --parent-id 2`
 2. Create a quiz deck linked to the skill:
    - `skill-tree deck create --deck-name "VPC Fundamentals" --description "Core VPC concepts" --skill-id 3`
 3. Add cards to the deck.
@@ -250,7 +259,7 @@ Imports all decks and cards from `~/.quiz/quiz.db` into skill-tree. Skips decks 
 3. Teach in-chat: explain the topic, work through examples, answer questions.
 4. Capture learning: create or update quiz cards for key concepts taught.
 5. Create a scenario if the topic benefits from hands-on practice.
-6. Update skill levels as proficiency grows: `skill-tree skill update --id 3 --level 2`
+6. Update skill levels as proficiency grows: `skill-tree skill update --id 2 --level 2`
 
 ### Updating skill levels
 Update levels based on demonstrated proficiency during sessions:

@@ -33,6 +33,10 @@ enum Commands {
     Context {
         #[arg(long)]
         json: bool,
+        #[arg(long)]
+        skill_id: Option<i64>,
+        #[arg(long)]
+        skill: Option<String>,
     },
     /// Manage skills
     Skill {
@@ -86,8 +90,8 @@ enum SkillCommands {
         description: String,
         #[arg(long, default_value = "0")]
         parent_id: i64,
-        #[arg(long, default_value = "0")]
-        level: i64,
+        #[arg(long)]
+        level: Option<i64>,
     },
     /// List skills
     List {
@@ -582,13 +586,17 @@ fn print_scenario_steps(steps: &[store::ScenarioStep], indent: &str) {
 fn print_skill_tree(skills: &[store::Skill], depth: usize) {
     for s in skills {
         let indent = "  ".repeat(depth);
-        println!(
-            "{indent}{} {} {}/5 {}",
-            s.name,
-            level_bar(s.level),
-            s.level,
-            level_label(s.level)
-        );
+        if let Some(level) = s.level {
+            println!(
+                "{indent}{} {} {}/5 {}",
+                s.name,
+                level_bar(level),
+                level,
+                level_label(level)
+            );
+        } else {
+            println!("{indent}{}", s.name);
+        }
         if !s.children.is_empty() {
             print_skill_tree(&s.children, depth + 1);
         }
@@ -622,9 +630,23 @@ fn run(cli: Cli) -> Result<(), String> {
     match cli.command {
         None => run_tree_command(),
         Some(cmd) => match cmd {
-            Commands::Context { .. } => {
+            Commands::Context {
+                skill_id, skill, ..
+            } => {
                 let st = Store::open()?;
-                let ctx = st.full_context()?;
+                let ctx = match (skill_id, skill.as_deref()) {
+                    (Some(_), Some(_)) => {
+                        return Err("specify only one of --skill-id or --skill".into());
+                    }
+                    (Some(skill_id), None) => st.scoped_context(skill_id)?,
+                    (None, Some(skill_name)) => {
+                        let tree = st.skill_tree()?;
+                        let skill = find_skill_by_name(&tree, skill_name)
+                            .ok_or_else(|| format!("skill \"{skill_name}\" not found"))?;
+                        st.scoped_context(skill.id)?
+                    }
+                    (None, None) => st.full_context()?,
+                };
                 json(&ctx);
                 Ok(())
             }
@@ -677,7 +699,9 @@ fn run_skill(cmd: SkillCommands) -> Result<(), String> {
             parent_id,
             level,
         } => {
-            validate_level(level)?;
+            if let Some(level) = level {
+                validate_level(level)?;
+            }
             let pid = if parent_id > 0 { Some(parent_id) } else { None };
             let st = Store::open()?;
             let id = st.create_skill(&name, &description, pid, level)?;
@@ -702,7 +726,11 @@ fn run_skill(cmd: SkillCommands) -> Result<(), String> {
             let pid = if parent_id > 0 { Some(parent_id) } else { None };
             let skills = st.list_skills(pid)?;
             for s in &skills {
-                println!("{}\t{}\t{}/5", s.id, s.name, s.level);
+                let level = s
+                    .level
+                    .map(|level| format!("{level}/5"))
+                    .unwrap_or_default();
+                println!("{}\t{}\t{}", s.id, s.name, level);
             }
             Ok(())
         }
@@ -716,22 +744,18 @@ fn run_skill(cmd: SkillCommands) -> Result<(), String> {
                 json(&skill);
                 return Ok(());
             }
-            println!(
-                "ID: {}\nName: {}\nLevel: {}/5 {}\nDescription: {}",
-                skill.id,
-                skill.name,
-                skill.level,
-                level_label(skill.level),
-                skill.description
-            );
+            println!("ID: {}\nName: {}", skill.id, skill.name);
+            if let Some(level) = skill.level {
+                println!("Level: {}/5 {}", level, level_label(level));
+            }
+            println!("Description: {}", skill.description);
             print_skill_links(&skill.decks, &skill.scenarios, "");
             for child in &skill.children {
-                println!(
-                    "\n{} ({}/5 {})",
-                    child.name,
-                    child.level,
-                    level_label(child.level)
-                );
+                if let Some(level) = child.level {
+                    println!("\n{} ({}/5 {})", child.name, level, level_label(level));
+                } else {
+                    println!("\n{}", child.name);
+                }
                 print_skill_links(&child.decks, &child.scenarios, "  ");
             }
             Ok(())
