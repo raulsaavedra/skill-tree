@@ -1173,6 +1173,11 @@ fn push_focus_line(
     focus_actions.push(action);
 }
 
+fn render_markdown_lines(content: &str, width: usize) -> Vec<Line<'static>> {
+    let result = cli_core::render(content, width);
+    cli_core::parse_lines(&result.lines)
+}
+
 fn effective_scenario_updated_at(scenario: &ScenarioDetail) -> &str {
     scenario
         .steps
@@ -1569,6 +1574,7 @@ fn draw_detail(f: &mut Frame, state: &TreeState, area: Rect) {
 fn draw_review(f: &mut Frame, review: &ReviewState) {
     let area = f.area();
     let mut lines = Vec::new();
+    let content_width = area.width.saturating_sub(4) as usize;
 
     match review.stage {
         ReviewStage::DeckSelect => {
@@ -1779,14 +1785,11 @@ fn draw_review(f: &mut Frame, review: &ReviewState) {
                     } else {
                         card.answer.clone()
                     };
-                    lines.push(Line::from(Span::styled(
-                        answer_text,
-                        Style::default().fg(Color::Green),
-                    )));
+                    lines.extend(render_markdown_lines(&answer_text, content_width));
 
                     if !card.extra.trim().is_empty() {
                         lines.push(Line::from(""));
-                        lines.push(Line::from(&*card.extra));
+                        lines.extend(render_markdown_lines(&card.extra, content_width));
                     }
                 }
             }
@@ -1813,4 +1816,55 @@ fn draw_review(f: &mut Frame, review: &ReviewState) {
         .block(Block::default().padding(ratatui::widgets::Padding::horizontal(2)))
         .wrap(Wrap { trim: false });
     f.render_widget(paragraph, area);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn plain_text(lines: &[Line<'static>]) -> String {
+        lines
+            .iter()
+            .flat_map(|line| line.spans.iter())
+            .map(|span| span.content.as_ref())
+            .collect::<Vec<_>>()
+            .join("")
+    }
+
+    #[test]
+    fn render_markdown_lines_parses_inline_styles() {
+        let lines = render_markdown_lines("A **bold** answer with `code`.", 80);
+        let plain = plain_text(&lines);
+
+        assert_eq!(plain, "A bold answer with code.");
+        assert!(!plain.contains("**"));
+        assert!(lines.iter().any(|line| {
+            line.spans.iter().any(|span| {
+                span.content.as_ref() == "bold" && span.style.add_modifier.contains(Modifier::BOLD)
+            })
+        }));
+        assert!(lines.iter().any(|line| {
+            line.spans
+                .iter()
+                .any(|span| span.content.as_ref() == "code" && span.style.fg == Some(Color::Cyan))
+        }));
+    }
+
+    #[test]
+    fn render_markdown_lines_expands_blocks_into_tui_lines() {
+        let lines = render_markdown_lines("- First\n- Second\n\n```rust\nlet x = 1;\n```", 80);
+        let plain_lines = lines
+            .iter()
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|span| span.content.as_ref())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>();
+
+        assert!(plain_lines.iter().any(|line| line.contains("First")));
+        assert!(plain_lines.iter().any(|line| line.contains("Second")));
+        assert!(plain_lines.iter().any(|line| line.contains("let x = 1;")));
+    }
 }
